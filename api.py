@@ -1,26 +1,34 @@
+import re
 import requests
 from datetime import datetime, timedelta
 
-BASE_URL = "https://api.football-data.org/v4"
-ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+BASE_URL     = "https://api.football-data.org/v4"
+ESPN_BASE    = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 ESPN_BASE_V2 = "https://site.api.espn.com/apis/v2/sports/soccer"
+ODDS_BASE    = "https://api.the-odds-api.com/v4"
 
-# Competições disponíveis no plano free da football-data.org
+# football-data.org — plano free
 LIGAS = {
-    "Premier League": "PL",
-    "La Liga": "PD",
-    "Serie A": "SA",
-    "Bundesliga": "BL1",
+    "Premier League":   "PL",
+    "La Liga":          "PD",
+    "Serie A":          "SA",
+    "Bundesliga":       "BL1",
     "Champions League": "CL",
 }
 
-# Ligas ESPN (sem autenticação)
-LIGAS_ESPN = {
-    "Brasileirão": "bra.1",
+# The Odds API — chaves de esporte
+LIGAS_ODDS = {
+    "Premier League":   "soccer_epl",
+    "La Liga":          "soccer_spain_la_liga",
+    "Serie A":          "soccer_italy_serie_a",
+    "Bundesliga":       "soccer_germany_bundesliga",
+    "Champions League": "soccer_uefa_champs_league",
 }
 
 
-def _headers(api_key):
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _headers_fd(api_key):
     return {"X-Auth-Token": api_key}
 
 
@@ -28,21 +36,129 @@ def _nome_time(team):
     return team.get("shortName") or team.get("name", "?")
 
 
+def _normalizar(nome):
+    """Normaliza nome de time para matching entre APIs."""
+    nome = nome.lower()
+    for suffix in [" fc", " cf", " sc", " ac", " afc", " utd", " united", " city"]:
+        nome = nome.replace(suffix, "")
+    nome = re.sub(r"[^a-z0-9 ]", "", nome)
+    return nome.strip()
+
+
+def _odd_apostada(palpite_casa, palpite_fora, odds_casa, odds_empate, odds_fora):
+    """Retorna a odd correspondente ao resultado previsto pelo palpite."""
+    if palpite_casa > palpite_fora:
+        return odds_casa
+    if palpite_casa < palpite_fora:
+        return odds_fora
+    return odds_empate
+
+
+# ── The Odds API ──────────────────────────────────────────────────────────────
+
+def get_odds(odds_api_key):
+    """
+    Busca odds h2h de todas as ligas europeias.
+    Retorna dict: {(home_norm, away_norm): {casa, empate, fora}}
+    Cache de 12h recomendado — ~5 requisições por chamada.
+    """
+    resultado = {}
+
+    for liga, sport_key in LIGAS_ODDS.items():
+        try:
+            r = requests.get(
+                f"{ODDS_BASE}/sports/{sport_key}/odds",
+                params={
+                    "apiKey": odds_api_key,
+                    "regions": "eu",
+                    "markets": "h2h",
+                    "oddsFormat": "decimal",
+                },
+                timeout=10,
+            )
+            if not r.ok:
+                continue
+
+            for match in r.json():
+                bookmakers = match.get("bookmakers", [])
+                if not bookmakers:
+                    continue
+
+                outcomes = bookmakers[0]["markets"][0]["outcomes"]
+                odds_dict = {o["name"]: o["price"] for o in outcomes}
+
+                home_key = _normalizar(match["home_team"])
+                away_key = _normalizar(match["away_team"])
+
+                resultado[(home_key, away_key)] = {
+                    "odds_casa":    odds_dict.get(match["home_team"], 2.0),
+                    "odds_empate":  odds_dict.get("Draw", 3.2),
+                    "odds_fora":    odds_dict.get(match["away_team"], 2.0),
+                }
+
+        except requests.exceptions.RequestException:
+            pass
+
+    return resultado
+
+
+def _mesclar_odds(jogo, odds_map):
+    """Mescla odds do mapa no objeto jogo (in-place)."""
+    home_k = _normalizar(jogo["casa"])
+    away_k = _normalizar(jogo["fora"])
+    match  = odds_map.get((home_k, away_k), {})
+    jogo["odds_casa"]   = match.get("odds_casa")
+    jogo["odds_empate"] = match.get("odds_empate")
+    jogo["odds_fora"]   = match.get("odds_fora")
+    return jogo
+
+
+# ── Odds calculadas por tabela (Brasileirão) ──────────────────────────────────
+
+def calcular_odds_por_pontos(pts_h, j_h, pts_a, j_a):
+    """
+    Calcula odds aproximadas com base nos pontos por jogo.
+    Inclui vantagem de jogar em casa (+15%).
+    """
+    ppg_h = (pts_h / max(j_h, 1)) * 1.15
+    ppg_a =  pts_a / max(j_a, 1)
+    total = ppg_h + ppg_a
+
+    if total == 0:
+        return 2.10, 3.20, 3.50  # odds neutras para início de temporada
+
+    sh = ppg_h / total
+    sa = ppg_a / total
+
+    p_draw = max(0.18, min(0.35, 0.28 - abs(sh - sa) * 0.3))
+    rem    = 1 - p_draw
+    p_h    = rem * sh
+    p_a    = rem * sa
+
+    margin = 0.92
+    odds_h = round(margin / max(p_h,    0.05), 2)
+    odds_d = round(margin / max(p_draw, 0.10), 2)
+    odds_a = round(margin / max(p_a,    0.05), 2)
+
+    return odds_h, odds_d, odds_a
+
+
+# ── football-data.org ─────────────────────────────────────────────────────────
+
 def get_jogos(api_key, dias_a_frente=7):
     """Retorna (jogos, erros) com partidas agendadas nos próximos dias."""
-    hoje = datetime.today()
+    hoje     = datetime.today()
     date_from = hoje.strftime("%Y-%m-%d")
-    date_to = (hoje + timedelta(days=dias_a_frente)).strftime("%Y-%m-%d")
+    date_to   = (hoje + timedelta(days=dias_a_frente)).strftime("%Y-%m-%d")
 
     jogos, erros = [], []
 
     for nome_liga, codigo in LIGAS.items():
-        url = f"{BASE_URL}/competitions/{codigo}/matches"
+        url    = f"{BASE_URL}/competitions/{codigo}/matches"
         params = {"dateFrom": date_from, "dateTo": date_to, "status": "SCHEDULED"}
 
         try:
-            r = requests.get(url, headers=_headers(api_key), params=params, timeout=10)
-            print(f"[{nome_liga}] status={r.status_code}")
+            r = requests.get(url, headers=_headers_fd(api_key), params=params, timeout=10)
 
             if r.status_code == 429:
                 erros.append(f"Limite de requisições atingido ({nome_liga})")
@@ -58,13 +174,18 @@ def get_jogos(api_key, dias_a_frente=7):
                 casa = _nome_time(match["homeTeam"])
                 fora = _nome_time(match["awayTeam"])
                 jogos.append({
-                    "id": str(match["id"]),
-                    "liga": nome_liga,
-                    "data": match["utcDate"],
-                    "casa": casa,
-                    "fora": fora,
-                    "label": f"[{nome_liga}] {casa} x {fora}",
-                    "fonte": "api",
+                    "id":         str(match["id"]),
+                    "liga":       nome_liga,
+                    "data":       match["utcDate"],
+                    "casa":       casa,
+                    "fora":       fora,
+                    "logo_casa":  match["homeTeam"].get("crest", ""),
+                    "logo_fora":  match["awayTeam"].get("crest", ""),
+                    "label":      f"[{nome_liga}] {casa} x {fora}",
+                    "fonte":      "api",
+                    "odds_casa":   None,
+                    "odds_empate": None,
+                    "odds_fora":   None,
                 })
 
         except requests.exceptions.RequestException as e:
@@ -75,18 +196,18 @@ def get_jogos(api_key, dias_a_frente=7):
 
 def get_resultados(api_key, days_back=7):
     """Retorna (jogos_finalizados, erros) dos últimos dias."""
-    hoje = datetime.today()
+    hoje      = datetime.today()
     date_from = (hoje - timedelta(days=days_back)).strftime("%Y-%m-%d")
-    date_to = hoje.strftime("%Y-%m-%d")
+    date_to   = hoje.strftime("%Y-%m-%d")
 
     jogos, erros = [], []
 
     for nome_liga, codigo in LIGAS.items():
-        url = f"{BASE_URL}/competitions/{codigo}/matches"
+        url    = f"{BASE_URL}/competitions/{codigo}/matches"
         params = {"dateFrom": date_from, "dateTo": date_to, "status": "FINISHED"}
 
         try:
-            r = requests.get(url, headers=_headers(api_key), params=params, timeout=10)
+            r = requests.get(url, headers=_headers_fd(api_key), params=params, timeout=10)
 
             if r.status_code == 403:
                 erros.append(f"{nome_liga}: sem acesso no plano atual")
@@ -96,19 +217,21 @@ def get_resultados(api_key, days_back=7):
                 continue
 
             for match in r.json().get("matches", []):
-                casa = _nome_time(match["homeTeam"])
-                fora = _nome_time(match["awayTeam"])
+                casa  = _nome_time(match["homeTeam"])
+                fora  = _nome_time(match["awayTeam"])
                 score = match.get("score", {}).get("fullTime", {})
                 jogos.append({
-                    "id": str(match["id"]),
-                    "liga": nome_liga,
-                    "data": match["utcDate"],
-                    "casa": casa,
-                    "fora": fora,
+                    "id":        str(match["id"]),
+                    "liga":      nome_liga,
+                    "data":      match["utcDate"],
+                    "casa":      casa,
+                    "fora":      fora,
+                    "logo_casa": match["homeTeam"].get("crest", ""),
+                    "logo_fora": match["awayTeam"].get("crest", ""),
                     "gols_casa": score.get("home"),
                     "gols_fora": score.get("away"),
-                    "label": f"[{nome_liga}] {casa} {score.get('home')}x{score.get('away')} {fora}",
-                    "fonte": "api",
+                    "label":     f"[{nome_liga}] {casa} {score.get('home')}x{score.get('away')} {fora}",
+                    "fonte":     "api",
                 })
 
         except requests.exceptions.RequestException as e:
@@ -117,11 +240,48 @@ def get_resultados(api_key, days_back=7):
     return jogos, erros
 
 
+def get_standings(api_key, competition_code):
+    """Retorna (tabela, erro) com a classificação de uma competição."""
+    url = f"{BASE_URL}/competitions/{competition_code}/standings"
+
+    try:
+        r = requests.get(url, headers=_headers_fd(api_key), timeout=10)
+
+        if r.status_code == 403:
+            return None, "Sem acesso no plano atual"
+        if not r.ok:
+            return None, f"Erro {r.status_code}"
+
+        tabela = []
+        for group in r.json().get("standings", []):
+            if group["type"] == "TOTAL":
+                for row in group["table"]:
+                    tabela.append({
+                        "Pos": row["position"],
+                        "Time": _nome_time(row["team"]),
+                        "Escudo": row["team"].get("crest", ""),
+                        "Pts": row["points"],
+                        "J":   row["playedGames"],
+                        "V":   row["won"],
+                        "E":   row["draw"],
+                        "D":   row["lost"],
+                        "GP":  row["goalsFor"],
+                        "GC":  row["goalsAgainst"],
+                        "SG":  row["goalDifference"],
+                    })
+                break
+
+        return tabela, None
+
+    except requests.exceptions.RequestException as e:
+        return None, str(e)
+
+
 # ── ESPN (Brasileirão) ────────────────────────────────────────────────────────
 
 def get_jogos_espn(dias_a_frente=7):
     """Retorna jogos agendados do Brasileirão via ESPN."""
-    hoje = datetime.today()
+    hoje  = datetime.today()
     jogos = []
 
     for i in range(dias_a_frente + 1):
@@ -136,24 +296,29 @@ def get_jogos_espn(dias_a_frente=7):
                 continue
 
             for evento in r.json().get("events", []):
-                comp = evento["competitions"][0]
+                comp   = evento["competitions"][0]
                 status = comp["status"]["type"]["name"]
 
                 if status != "STATUS_SCHEDULED":
                     continue
 
                 times = {t["homeAway"]: t for t in comp["competitors"]}
-                casa = times["home"]["team"]["shortDisplayName"]
-                fora = times["away"]["team"]["shortDisplayName"]
+                casa  = times["home"]["team"]["shortDisplayName"]
+                fora  = times["away"]["team"]["shortDisplayName"]
 
                 jogos.append({
-                    "id": f"espn_{evento['id']}",
-                    "liga": "Brasileirão",
-                    "data": comp["date"],
-                    "casa": casa,
-                    "fora": fora,
-                    "label": f"[Brasileirão] {casa} x {fora}",
-                    "fonte": "espn",
+                    "id":          f"espn_{evento['id']}",
+                    "liga":        "Brasileirão",
+                    "data":        comp["date"],
+                    "casa":        casa,
+                    "fora":        fora,
+                    "logo_casa":   times["home"]["team"].get("logo", ""),
+                    "logo_fora":   times["away"]["team"].get("logo", ""),
+                    "label":       f"[Brasileirão] {casa} x {fora}",
+                    "fonte":       "espn",
+                    "odds_casa":   None,
+                    "odds_empate": None,
+                    "odds_fora":   None,
                 })
 
         except requests.exceptions.RequestException:
@@ -164,7 +329,7 @@ def get_jogos_espn(dias_a_frente=7):
 
 def get_resultados_espn(days_back=7):
     """Retorna resultados finalizados do Brasileirão via ESPN."""
-    hoje = datetime.today()
+    hoje  = datetime.today()
     jogos = []
 
     for i in range(1, days_back + 1):
@@ -179,28 +344,30 @@ def get_resultados_espn(days_back=7):
                 continue
 
             for evento in r.json().get("events", []):
-                comp = evento["competitions"][0]
+                comp   = evento["competitions"][0]
                 status = comp["status"]["type"]["name"]
 
                 if status != "STATUS_FINAL":
                     continue
 
                 times = {t["homeAway"]: t for t in comp["competitors"]}
-                casa = times["home"]["team"]["shortDisplayName"]
-                fora = times["away"]["team"]["shortDisplayName"]
-                gc = int(times["home"].get("score", 0))
-                gf = int(times["away"].get("score", 0))
+                casa  = times["home"]["team"]["shortDisplayName"]
+                fora  = times["away"]["team"]["shortDisplayName"]
+                gc    = int(times["home"].get("score", 0))
+                gf    = int(times["away"].get("score", 0))
 
                 jogos.append({
-                    "id": f"espn_{evento['id']}",
-                    "liga": "Brasileirão",
-                    "data": comp["date"],
-                    "casa": casa,
-                    "fora": fora,
+                    "id":        f"espn_{evento['id']}",
+                    "liga":      "Brasileirão",
+                    "data":      comp["date"],
+                    "casa":      casa,
+                    "fora":      fora,
+                    "logo_casa": times["home"]["team"].get("logo", ""),
+                    "logo_fora": times["away"]["team"].get("logo", ""),
                     "gols_casa": gc,
                     "gols_fora": gf,
-                    "label": f"[Brasileirão] {casa} {gc}x{gf} {fora}",
-                    "fonte": "espn",
+                    "label":     f"[Brasileirão] {casa} {gc}x{gf} {fora}",
+                    "fonte":     "espn",
                 })
 
         except requests.exceptions.RequestException:
@@ -210,7 +377,7 @@ def get_resultados_espn(days_back=7):
 
 
 def get_standings_espn():
-    """Retorna classificação do Brasileirão via ESPN."""
+    """Retorna (tabela, erro) com a classificação do Brasileirão via ESPN."""
     try:
         r = requests.get(f"{ESPN_BASE_V2}/bra.1/standings", timeout=10)
         if not r.ok:
@@ -226,57 +393,20 @@ def get_standings_espn():
         for i, entry in enumerate(entries, 1):
             stats = {s["name"]: s.get("value", 0) for s in entry.get("stats", [])}
             tabela.append({
-                "Pos": int(stats.get("rank", i)),
-                "Time": entry["team"]["shortDisplayName"],
-                "Pts": int(stats.get("points", 0)),
-                "J": int(stats.get("gamesPlayed", 0)),
-                "V": int(stats.get("wins", 0)),
-                "E": int(stats.get("ties", 0)),
-                "D": int(stats.get("losses", 0)),
-                "GP": int(stats.get("pointsFor", 0)),
-                "GC": int(stats.get("pointsAgainst", 0)),
-                "SG": int(stats.get("pointDifferential", 0)),
+                "Pos":    int(stats.get("rank", i)),
+                "Time":   entry["team"]["shortDisplayName"],
+                "Escudo": entry["team"].get("logo", ""),
+                "Pts":    int(stats.get("points", 0)),
+                "J":      int(stats.get("gamesPlayed", 0)),
+                "V":      int(stats.get("wins", 0)),
+                "E":      int(stats.get("ties", 0)),
+                "D":      int(stats.get("losses", 0)),
+                "GP":     int(stats.get("pointsFor", 0)),
+                "GC":     int(stats.get("pointsAgainst", 0)),
+                "SG":     int(stats.get("pointDifferential", 0)),
             })
 
         tabela.sort(key=lambda x: x["Pos"])
-        return tabela, None
-
-    except requests.exceptions.RequestException as e:
-        return None, str(e)
-
-
-# ── football-data.org ─────────────────────────────────────────────────────────
-
-def get_standings(api_key, competition_code):
-    """Retorna (tabela, erro) com a classificação de uma competição."""
-    url = f"{BASE_URL}/competitions/{competition_code}/standings"
-
-    try:
-        r = requests.get(url, headers=_headers(api_key), timeout=10)
-
-        if r.status_code == 403:
-            return None, "Sem acesso no plano atual"
-        if not r.ok:
-            return None, f"Erro {r.status_code}"
-
-        tabela = []
-        for group in r.json().get("standings", []):
-            if group["type"] == "TOTAL":
-                for row in group["table"]:
-                    tabela.append({
-                        "Pos": row["position"],
-                        "Time": _nome_time(row["team"]),
-                        "Pts": row["points"],
-                        "J": row["playedGames"],
-                        "V": row["won"],
-                        "E": row["draw"],
-                        "D": row["lost"],
-                        "GP": row["goalsFor"],
-                        "GC": row["goalsAgainst"],
-                        "SG": row["goalDifference"],
-                    })
-                break
-
         return tabela, None
 
     except requests.exceptions.RequestException as e:

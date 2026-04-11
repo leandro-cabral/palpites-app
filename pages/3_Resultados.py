@@ -107,20 +107,22 @@ with tab_processar:
                     continue
 
                 palpites = conn.execute(
-                    "SELECT id, usuario, palpite_casa, palpite_fora, COALESCE(moeda_apostada,0) as moeda_apostada FROM palpites WHERE jogo_id = ? AND pontos IS NULL",
+                    """SELECT id, usuario, palpite_casa, palpite_fora,
+                              COALESCE(moeda_apostada,0) as moeda_apostada, odd_apostada
+                       FROM palpites WHERE jogo_id=? AND pontos IS NULL""",
                     (j["id"],),
                 ).fetchall()
 
                 for p in palpites:
-                    pts = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc, gf)
-                    moedas = calcular_moedas_ganhas(pts, bool(p["moeda_apostada"]))
+                    pts    = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc, gf)
+                    moedas = calcular_moedas_ganhas(pts, bool(p["moeda_apostada"]), p["odd_apostada"])
                     conn.execute(
                         "UPDATE palpites SET gols_casa_real=?, gols_fora_real=?, pontos=?, moedas_ganhas=? WHERE id=?",
                         (gc, gf, pts, moedas, p["id"]),
                     )
                     if moedas != 0:
                         conn.execute(
-                            "UPDATE usuarios SET saldo_moedas = saldo_moedas + ? WHERE nome = ?",
+                            "UPDATE usuarios SET saldo_moedas = saldo_moedas + ? WHERE nome=?",
                             (moedas, p["usuario"]),
                         )
                     atualizados += 1
@@ -159,21 +161,23 @@ with tab_processar:
 
             jid_str = f"manual_{jogo_id}"
             palpites = conn.execute(
-                "SELECT id, usuario, palpite_casa, palpite_fora, COALESCE(moeda_apostada,0) as moeda_apostada FROM palpites WHERE jogo_id = ? AND pontos IS NULL",
+                """SELECT id, usuario, palpite_casa, palpite_fora,
+                          COALESCE(moeda_apostada,0) as moeda_apostada, odd_apostada
+                   FROM palpites WHERE jogo_id=? AND pontos IS NULL""",
                 (jid_str,),
             ).fetchall()
 
             atualizados = 0
             for p in palpites:
-                pts = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc_m, gf_m)
-                moedas = calcular_moedas_ganhas(pts, bool(p["moeda_apostada"]))
+                pts    = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc_m, gf_m)
+                moedas = calcular_moedas_ganhas(pts, bool(p["moeda_apostada"]), p["odd_apostada"])
                 conn.execute(
                     "UPDATE palpites SET gols_casa_real=?, gols_fora_real=?, pontos=?, moedas_ganhas=? WHERE id=?",
                     (gc_m, gf_m, pts, moedas, p["id"]),
                 )
                 if moedas != 0:
                     conn.execute(
-                        "UPDATE usuarios SET saldo_moedas = saldo_moedas + ? WHERE nome = ?",
+                        "UPDATE usuarios SET saldo_moedas = saldo_moedas + ? WHERE nome=?",
                         (moedas, p["usuario"]),
                     )
                 atualizados += 1

@@ -36,15 +36,16 @@ DESCRICAO_PONTOS = {
 }
 
 
-def calcular_moedas_ganhas(pontos, moeda_apostada):
+def calcular_moedas_ganhas(pontos, moeda_apostada, odd_apostada=None):
     """
     Retorna o delta de moedas ao processar um resultado.
-      pontos > 0 → ganha `pontos` moedas
-      pontos = 0 → perde 1 moeda
-      moeda não apostada → 0
+      Acertou → max(1, round(pontos × odd))
+      Errou   → -1
+      Sem moeda → 0
     """
     if not moeda_apostada:
         return 0
     if pontos == 0:
         return -1
-    return pontos
+    odd = odd_apostada or 1.0
+    return max(1, round(pontos * odd))

@@ -74,5 +74,21 @@ def init_db():
     except Exception:
         pass
 
+    try:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN avatar_style TEXT DEFAULT 'avataaars'")
+    except Exception:
+        pass
+
+    for col_sql in [
+        "ALTER TABLE palpites ADD COLUMN odds_casa REAL",
+        "ALTER TABLE palpites ADD COLUMN odds_empate REAL",
+        "ALTER TABLE palpites ADD COLUMN odds_fora REAL",
+        "ALTER TABLE palpites ADD COLUMN odd_apostada REAL",
+    ]:
+        try:
+            cursor.execute(col_sql)
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
