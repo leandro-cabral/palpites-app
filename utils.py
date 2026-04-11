@@ -69,11 +69,23 @@ def sidebar_login():
 
         col_login, col_cadastro = st.columns(2)
 
+        # Exibe mensagem persistente de erro/aviso
+        if st.session_state.get("_login_msg"):
+            tipo, texto = st.session_state["_login_msg"]
+            if tipo == "error":
+                st.error(texto)
+            elif tipo == "warning":
+                st.warning(texto)
+            elif tipo == "success":
+                st.success(texto)
+
         # ── Entrar ────────────────────────────────────────────────────────────
         if col_login.button("Entrar", use_container_width=True, type="primary"):
+            st.session_state.pop("_login_msg", None)
             nome = nome.strip()
             if not nome or not senha:
-                st.warning("Preencha nome e senha.")
+                st.session_state["_login_msg"] = ("warning", "Preencha nome e senha.")
+                st.rerun()
             else:
                 conn = get_connection()
                 row  = conn.execute(
@@ -81,8 +93,9 @@ def sidebar_login():
                 ).fetchone()
                 conn.close()
 
-                if row is None:
-                    st.error("Usuário não encontrado.")
+                if row is None or (row["senha_hash"] is not None and row["senha_hash"] != _hash(senha)):
+                    st.session_state["_login_msg"] = ("error", "Nome de usuário ou senha incorretos.")
+                    st.rerun()
                 elif row["senha_hash"] is None:
                     # Conta sem senha (migração) — define a senha agora
                     conn = get_connection()
@@ -92,29 +105,33 @@ def sidebar_login():
                     )
                     conn.commit()
                     conn.close()
+                    st.session_state.pop("_login_msg", None)
                     st.session_state["usuario"] = nome
                     st.rerun()
-                elif row["senha_hash"] != _hash(senha):
-                    st.error("Senha incorreta.")
                 else:
+                    st.session_state.pop("_login_msg", None)
                     st.session_state["usuario"] = nome
                     st.rerun()
 
         # ── Cadastrar ─────────────────────────────────────────────────────────
         if col_cadastro.button("Cadastrar", use_container_width=True):
+            st.session_state.pop("_login_msg", None)
             nome = nome.strip()
             if not nome or not senha:
-                st.warning("Preencha nome e senha.")
+                st.session_state["_login_msg"] = ("warning", "Preencha nome e senha.")
+                st.rerun()
             elif len(senha) < 4:
-                st.warning("Senha deve ter ao menos 4 caracteres.")
+                st.session_state["_login_msg"] = ("warning", "Senha deve ter ao menos 4 caracteres.")
+                st.rerun()
             else:
                 conn = get_connection()
                 existe = conn.execute(
                     "SELECT id FROM usuarios WHERE nome=?", (nome,)
                 ).fetchone()
                 if existe:
-                    st.error("Nome já cadastrado. Escolha outro ou faça login.")
+                    st.session_state["_login_msg"] = ("error", "Nome já cadastrado. Escolha outro ou faça login.")
                     conn.close()
+                    st.rerun()
                 else:
                     try:
                         conn.execute(
@@ -122,10 +139,12 @@ def sidebar_login():
                             (nome, _hash(senha)),
                         )
                         conn.commit()
+                        st.session_state.pop("_login_msg", None)
                         st.session_state["usuario"] = nome
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Erro: {e}")
+                        st.session_state["_login_msg"] = ("error", f"Erro: {e}")
+                        st.rerun()
                     finally:
                         conn.close()
 
