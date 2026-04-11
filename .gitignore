@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Secrets — nunca commitar a API key
+.streamlit/secrets.toml
+
+# Banco de dados local
+data/
+*.db
