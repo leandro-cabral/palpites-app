@@ -10,7 +10,7 @@ from utils import sidebar_login
 st.set_page_config(page_title="Palpites", page_icon="⚽", layout="wide")
 
 API_KEY      = st.secrets["API_KEY"]
-ODDS_API_KEY = st.secrets["ODDS_API_KEY"]
+ODDS_API_KEY = st.secrets.get("ODDS_API_KEY", None)
 init_db()
 
 
@@ -23,8 +23,10 @@ def carregar_jogos_brasileirao():
     return get_jogos_espn(dias_a_frente=7)
 
 @st.cache_data(ttl=43200)   # 12h — ~5 requisições por refresh
-def carregar_odds():
-    return get_odds(ODDS_API_KEY)
+def carregar_odds(key):
+    if not key:
+        return {}
+    return get_odds(key)
 
 @st.cache_data(ttl=1800)
 def carregar_standings_brasileirao():
@@ -96,7 +98,7 @@ jogos_manuais = [{
 } for r in jogos_manuais_raw]
 
 # Mescla odds das ligas europeias
-odds_map = carregar_odds()
+odds_map = carregar_odds(ODDS_API_KEY)
 for j in jogos_api:
     _mesclar_odds(j, odds_map)
 
