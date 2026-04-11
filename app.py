@@ -221,7 +221,8 @@ for nome_liga, jogos in ligas.items():
                 st.image(jogo["logo_fora"], width=36)
 
         with col_ec_in:
-            max_aposta = int(max(saldo - ec_ja_apostado, 0))
+            # Travado: max = valor já apostado; livre: max = saldo disponível
+            max_aposta = int(aposta_atual) if locked else int(max(saldo - ec_ja_apostado, 0))
             aposta = st.number_input(
                 "💰 EC", min_value=0, max_value=max_aposta,
                 value=int(aposta_atual), step=1, key=f"aposta_{jid}",
