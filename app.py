@@ -168,6 +168,12 @@ apostas_no_form = {}
 for nome_liga, jogos in ligas.items():
     st.subheader(nome_liga)
 
+    # Cabeçalho das colunas
+    h_lc, h_casa, h_gc, h_x, h_gf, h_fora, h_lf, h_ec = st.columns([0.5, 2.2, 0.9, 0.3, 0.9, 2.2, 0.5, 1.5])
+    h_gc.caption("Casa")
+    h_gf.caption("Fora")
+    h_ec.caption("💰 EC")
+
     for jogo in jogos:
         jid          = jogo["id"]
         exist        = palpites_atuais.get(jid, (0, 0, 0))
@@ -227,7 +233,7 @@ for nome_liga, jogos in ligas.items():
                 "💰 EC", min_value=0, max_value=max_aposta,
                 value=int(aposta_atual), step=1, key=f"aposta_{jid}",
                 help="Elevação Coins a apostar neste jogo",
-                disabled=locked,
+                disabled=locked, label_visibility="collapsed",
             )
 
         novos_palpites[jid]  = (jogo, gc, gf)
