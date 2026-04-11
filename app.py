@@ -185,25 +185,17 @@ for nome_liga, jogos in ligas.items():
         of_  = _fmt_odd(jogo.get("odds_fora"))
         tem_odds = jogo.get("odds_casa") is not None
         odds_str = f"🏠 {oc} · ➖ {oe} · ✈️ {of_}" if tem_odds else "odds indisponíveis"
-        badge = " 🔒" if locked else (" ✏️" if jid in palpites_atuais else "")
+        badge = " 🔒" if locked else ""
 
-        # Layout: [logo_casa] [info + logo_fora] [gc] [x] [gf] [ec]
-        col_lc, col_info, col_gc, col_x, col_gf, col_ec_in = st.columns([0.5, 4, 1, 0.4, 1, 1.5])
+        # Layout: [logo_casa] [nome_casa] [gc] [x] [gf] [nome_fora] [logo_fora] [ec]
+        col_lc, col_casa, col_gc, col_x, col_gf, col_fora, col_lf, col_ec_in = st.columns([0.5, 2.2, 0.9, 0.3, 0.9, 2.2, 0.5, 1.5])
 
         with col_lc:
             if jogo.get("logo_casa"):
                 st.image(jogo["logo_casa"], width=36)
 
-        with col_info:
-            logo_fora_html = ""
-            # Nome dos times + logo do visitante inline
-            if jogo.get("logo_fora"):
-                # usamos st.image em sub-coluna para manter o logo ao lado do nome
-                sub_nome, sub_logo = st.columns([5, 1])
-                sub_nome.markdown(f"**{jogo['casa']} x {jogo['fora']}**{badge}")
-                sub_logo.image(jogo["logo_fora"], width=28)
-            else:
-                st.markdown(f"**{jogo['casa']} x {jogo['fora']}**{badge}")
+        with col_casa:
+            st.markdown(f"**{jogo['casa']}**{badge}")
             st.caption(f"{data_fmt} · {odds_str}")
 
         with col_gc:
@@ -220,6 +212,13 @@ for nome_liga, jogos in ligas.items():
                 value=exist[1], step=1, key=f"fora_{jid}",
                 label_visibility="collapsed", disabled=locked,
             )
+
+        with col_fora:
+            st.markdown(f"**{jogo['fora']}**")
+
+        with col_lf:
+            if jogo.get("logo_fora"):
+                st.image(jogo["logo_fora"], width=36)
 
         with col_ec_in:
             max_aposta = int(max(saldo - ec_ja_apostado, 0))
