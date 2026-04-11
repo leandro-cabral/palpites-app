@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timezone
 from api import (
     get_jogos, get_jogos_espn, get_odds, get_standings_espn,
     calcular_odds_por_pontos, _mesclar_odds, _odd_apostada,
@@ -178,20 +178,32 @@ for nome_liga, jogos in ligas.items():
         jid          = jogo["id"]
         exist        = palpites_atuais.get(jid, (0, 0, 0))
         aposta_atual = float(exist[2]) if exist[2] else 0.0
-        locked       = aposta_atual > 0
 
+        # Trava se já apostou OU se o jogo já começou
         try:
-            dt       = datetime.fromisoformat(jogo["data"].replace("Z", "+00:00"))
-            data_fmt = dt.strftime("%d/%m %H:%M")
+            dt         = datetime.fromisoformat(jogo["data"].replace("Z", "+00:00"))
+            data_fmt   = dt.strftime("%d/%m %H:%M")
+            iniciou    = datetime.now(timezone.utc) >= dt
         except Exception:
-            data_fmt = jogo["data"]
+            dt, data_fmt, iniciou = None, jogo["data"], False
 
-        oc   = _fmt_odd(jogo.get("odds_casa"))
-        oe   = _fmt_odd(jogo.get("odds_empate"))
-        of_  = _fmt_odd(jogo.get("odds_fora"))
-        tem_odds = jogo.get("odds_casa") is not None
-        odds_str = f"🏠 {oc} · ➖ {oe} · ✈️ {of_}" if tem_odds else "odds indisponíveis"
-        badge = " 🔒" if locked else ""
+        locked = aposta_atual > 0 or iniciou
+        if iniciou and aposta_atual == 0:
+            badge = " ⏱️"   # jogo em andamento/encerrado, sem aposta prévia
+        elif locked:
+            badge = " 🔒"   # apostado — travado
+        else:
+            badge = ""
+
+        oc  = _fmt_odd(jogo.get("odds_casa"))
+        oe  = _fmt_odd(jogo.get("odds_empate"))
+        of_ = _fmt_odd(jogo.get("odds_fora"))
+        if iniciou:
+            odds_str = "🔴 apostas encerradas"
+        elif jogo.get("odds_casa") is not None:
+            odds_str = f"🏠 {oc} · ➖ {oe} · ✈️ {of_}"
+        else:
+            odds_str = "odds indisponíveis"
 
         # Layout: [logo_casa] [nome_casa] [gc] [x] [gf] [nome_fora] [logo_fora] [ec]
         col_lc, col_casa, col_gc, col_x, col_gf, col_fora, col_lf, col_ec_in = st.columns([0.5, 2.2, 0.9, 0.3, 0.9, 2.2, 0.5, 1.5])
