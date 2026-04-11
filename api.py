@@ -1,5 +1,6 @@
 import re
 import requests
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 
 BASE_URL     = "https://api.football-data.org/v4"
@@ -39,10 +40,43 @@ def _nome_time(team):
 def _normalizar(nome):
     """Normaliza nome de time para matching entre APIs."""
     nome = nome.lower()
-    for suffix in [" fc", " cf", " sc", " ac", " afc", " utd", " united", " city"]:
-        nome = nome.replace(suffix, "")
+    for token in [" fc", " cf", " sc", " ac", " afc", " ssc", " as ", " ss ",
+                  " utd", " united", " city", " hotspur", " wanderers",
+                  " athletic", " sport", " sporting", " club", " de "]:
+        nome = nome.replace(token, " ")
     nome = re.sub(r"[^a-z0-9 ]", "", nome)
-    return nome.strip()
+    return re.sub(r"\s+", " ", nome).strip()
+
+
+def _similaridade(a, b):
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _melhor_match(home_k, away_k, odds_map, threshold=0.72):
+    """
+    Tenta encontrar o melhor par (home, away) no odds_map.
+    1. Busca exata
+    2. Busca por substring (um nome contém o outro)
+    3. Fuzzy matching com difflib
+    """
+    # 1. Exato
+    if (home_k, away_k) in odds_map:
+        return odds_map[(home_k, away_k)]
+
+    best_score, best = 0.0, None
+    for (h, a), val in odds_map.items():
+        # 2. Substring
+        home_ok = home_k in h or h in home_k
+        away_ok = away_k in a or a in away_k
+        if home_ok and away_ok:
+            return val
+
+        # 3. Fuzzy
+        score = (_similaridade(home_k, h) + _similaridade(away_k, a)) / 2
+        if score > best_score:
+            best_score, best = score, val
+
+    return best if best_score >= threshold else None
 
 
 def _odd_apostada(palpite_casa, palpite_fora, odds_casa, odds_empate, odds_fora):
@@ -103,10 +137,10 @@ def get_odds(odds_api_key):
 
 
 def _mesclar_odds(jogo, odds_map):
-    """Mescla odds do mapa no objeto jogo (in-place)."""
+    """Mescla odds no objeto jogo usando exact → substring → fuzzy matching."""
     home_k = _normalizar(jogo["casa"])
     away_k = _normalizar(jogo["fora"])
-    match  = odds_map.get((home_k, away_k), {})
+    match  = _melhor_match(home_k, away_k, odds_map) or {}
     jogo["odds_casa"]   = match.get("odds_casa")
     jogo["odds_empate"] = match.get("odds_empate")
     jogo["odds_fora"]   = match.get("odds_fora")

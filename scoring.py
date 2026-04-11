@@ -36,16 +36,25 @@ DESCRICAO_PONTOS = {
 }
 
 
-def calcular_moedas_ganhas(pontos, moeda_apostada, odd_apostada=None):
+def fmt_ec(valor):
+    """Formata valor de Elevação Coin para exibição."""
+    if valor is None:
+        return "—"
+    return f"{valor:+.2f} EC" if valor != 0 else "0 EC"
+
+
+def calcular_ec_ganhos(pontos, valor_apostado, odd_apostada=None):
     """
-    Retorna o delta de moedas ao processar um resultado.
-      Acertou → max(1, round(pontos × odd))
-      Errou   → -1
-      Sem moeda → 0
+    Retorna o delta de Elevação Coins ao processar um resultado.
+      Acertou resultado  → valor × odd − valor  (lucro líquido)
+      Acertou placar exato → valor × odd × 1.5 − valor  (bônus 50%)
+      Errou              → −valor_apostado
+      Sem aposta         → 0.0
     """
-    if not moeda_apostada:
-        return 0
+    if not valor_apostado:
+        return 0.0
     if pontos == 0:
-        return -1
-    odd = odd_apostada or 1.0
-    return max(1, round(pontos * odd))
+        return -float(valor_apostado)
+    odd   = float(odd_apostada or 1.0)
+    bonus = 1.5 if pontos == 3 else 1.0
+    return valor_apostado * odd * bonus - valor_apostado

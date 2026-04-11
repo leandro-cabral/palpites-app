@@ -22,7 +22,7 @@ conn = get_connection()
 rows = conn.execute("""
     SELECT
         p.usuario,
-        u.saldo_moedas,
+        COALESCE(u.saldo_ec, u.saldo_moedas, 10) AS saldo_ec,
         COUNT(*) AS total_palpites,
         SUM(CASE WHEN p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS jogos_avaliados,
         COALESCE(SUM(p.pontos), 0) AS total_pontos,
@@ -30,8 +30,8 @@ rows = conn.execute("""
         SUM(CASE WHEN p.pontos = 2 THEN 1 ELSE 0 END) AS empates_certos,
         SUM(CASE WHEN p.pontos = 1 THEN 1 ELSE 0 END) AS resultados_certos,
         SUM(CASE WHEN p.pontos = 0 THEN 1 ELSE 0 END) AS erros,
-        SUM(CASE WHEN p.moeda_apostada = 1 AND p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS apostas_resolvidas,
-        COALESCE(SUM(CASE WHEN p.moeda_apostada = 1 THEN p.moedas_ganhas ELSE 0 END), 0) AS moedas_ganhas_total
+        SUM(CASE WHEN p.moeda_apostada > 0 AND p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS apostas_resolvidas,
+        COALESCE(SUM(CASE WHEN p.moeda_apostada > 0 THEN p.moedas_ganhas ELSE 0 END), 0) AS ec_ganhos_total
     FROM palpites p
     LEFT JOIN usuarios u ON p.usuario = u.nome
     GROUP BY p.usuario
@@ -52,7 +52,7 @@ df.index.name = "Pos"
 
 df_display = df.rename(columns={
     "usuario": "_usuario",
-    "saldo_moedas": "🪙 Saldo",
+    "saldo_ec": "💰 Saldo EC",
     "total_pontos": "Pts",
     "jogos_avaliados": "Avaliados",
     "total_palpites": "Palpites",
@@ -61,7 +61,7 @@ df_display = df.rename(columns={
     "resultados_certos": "Vencedor (1pt)",
     "erros": "Erros",
     "apostas_resolvidas": "Apostas",
-    "moedas_ganhas_total": "🪙 Ganhas",
+    "ec_ganhos_total": "💰 EC Ganhos",
 })
 
 # Destaque para o líder
@@ -71,7 +71,7 @@ if len(df_display) > 0:
     col1.metric("Lider", lider["Jogador"])
     col2.metric("Pontos", int(lider["Pts"]))
     col3.metric("Placares exatos", int(lider["Exatos (3pts)"]))
-    col4.metric("🪙 Saldo", int(lider["🪙 Saldo"]))
+    col4.metric("💰 Saldo EC", f"{float(lider['💰 Saldo EC']):.2f}")
 
 st.divider()
 st.dataframe(df_display, use_container_width=True)

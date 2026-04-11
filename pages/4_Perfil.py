@@ -1,5 +1,6 @@
 import streamlit as st
 from database import get_connection, init_db
+from scoring import fmt_ec
 from utils import sidebar_login, get_avatar, AVATARES
 
 st.set_page_config(page_title="Perfil", page_icon="👤", layout="wide")
@@ -19,10 +20,13 @@ if not usuario:
     st.stop()
 
 conn = get_connection()
-row  = conn.execute("SELECT saldo_moedas, avatar_style FROM usuarios WHERE nome=?", (usuario,)).fetchone()
+row  = conn.execute(
+    "SELECT COALESCE(saldo_ec, saldo_moedas, 10) as saldo, avatar_style FROM usuarios WHERE nome=?",
+    (usuario,),
+).fetchone()
 conn.close()
 
-saldo  = row["saldo_moedas"] if row else 10
+saldo  = float(row["saldo"] if row else 10.0)
 avatar = get_avatar(usuario)
 
 # ── Avatar atual ──────────────────────────────────────────────────────────────
@@ -34,7 +38,7 @@ with col_av:
     )
 with col_info:
     st.markdown(f"### {usuario}")
-    st.markdown(f"🪙 **Saldo de moedas:** {saldo}")
+    st.markdown(f"💰 **Saldo Elevação Coin:** {saldo:.2f} EC")
 
 st.divider()
 
@@ -82,17 +86,16 @@ else:
         )
         pts_badge = f"{cores_pts.get(p['pontos'],'')} **{p['pontos']} pts**" if p["pontos"] is not None else ""
 
-        moeda_info = ""
+        ec_info = ""
         if p["moeda_apostada"]:
             odd_txt = f" (odd {p['odd_apostada']:.2f})" if p["odd_apostada"] else ""
             if p["moedas_ganhas"] is not None:
-                sinal = "+" if p["moedas_ganhas"] > 0 else ""
-                moeda_info = f" · 🪙 {sinal}{p['moedas_ganhas']}{odd_txt}"
+                ec_info = f" · 💰 {fmt_ec(p['moedas_ganhas'])}{odd_txt}"
             else:
-                moeda_info = f" · 🪙 em jogo{odd_txt}"
+                ec_info = f" · 💰 {p['moeda_apostada']:.2f} EC em jogo{odd_txt}"
 
         st.markdown(
             f"**{p['jogo']}**  \n"
             f"Palpite: `{p['palpite_casa']}x{p['palpite_fora']}` · "
-            f"Resultado: `{resultado}` {pts_badge}{moeda_info}"
+            f"Resultado: `{resultado}` {pts_badge}{ec_info}"
         )

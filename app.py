@@ -6,6 +6,7 @@ from api import (
 )
 from database import get_connection, init_db
 from utils import sidebar_login
+from scoring import fmt_ec
 
 st.set_page_config(page_title="Palpites", page_icon="⚽", layout="wide")
 
@@ -22,7 +23,7 @@ def carregar_jogos_api():
 def carregar_jogos_brasileirao():
     return get_jogos_espn(dias_a_frente=7)
 
-@st.cache_data(ttl=43200)   # 12h — ~5 requisições por refresh
+@st.cache_data(ttl=43200)
 def carregar_odds(key):
     if not key:
         return {}
@@ -37,23 +38,23 @@ def palpites_do_usuario(usuario):
     conn = get_connection()
     rows = conn.execute(
         """SELECT jogo_id, palpite_casa, palpite_fora,
-                  COALESCE(moeda_apostada, 0) as moeda_apostada
-           FROM palpites WHERE usuario = ?""",
+                  COALESCE(moeda_apostada, 0) as aposta
+           FROM palpites WHERE usuario=?""",
         (usuario,),
     ).fetchall()
     conn.close()
-    return {r["jogo_id"]: (r["palpite_casa"], r["palpite_fora"], bool(r["moeda_apostada"])) for r in rows}
+    return {r["jogo_id"]: (r["palpite_casa"], r["palpite_fora"], r["aposta"]) for r in rows}
 
 
-def info_moedas(usuario):
+def info_ec(usuario):
     conn = get_connection()
-    row     = conn.execute("SELECT saldo_moedas FROM usuarios WHERE nome = ?", (usuario,)).fetchone()
+    row     = conn.execute("SELECT COALESCE(saldo_ec, saldo_moedas, 10) as saldo FROM usuarios WHERE nome=?", (usuario,)).fetchone()
     em_jogo = conn.execute(
-        "SELECT COUNT(*) as c FROM palpites WHERE usuario = ? AND moeda_apostada = 1 AND pontos IS NULL",
+        "SELECT COALESCE(SUM(moeda_apostada), 0) as c FROM palpites WHERE usuario=? AND moeda_apostada > 0 AND pontos IS NULL",
         (usuario,),
     ).fetchone()["c"]
     conn.close()
-    return (row["saldo_moedas"] if row else 10), em_jogo
+    return float(row["saldo"] if row else 10.0), float(em_jogo)
 
 
 def _fmt_odd(v):
@@ -67,7 +68,6 @@ with st.sidebar:
 
 usuario = sidebar_login()
 
-# ── Conteúdo ──────────────────────────────────────────────────────────────────
 st.title("⚽ Fazer Palpites")
 
 if not usuario:
@@ -75,12 +75,14 @@ if not usuario:
     st.stop()
 
 # Carrega jogos
-jogos_api, erros      = carregar_jogos_api()
-jogos_brasileirao     = carregar_jogos_brasileirao()
-jogos_manuais_raw     = get_connection().execute(
+jogos_api, erros  = carregar_jogos_api()
+jogos_brasileirao = carregar_jogos_brasileirao()
+
+conn_tmp = get_connection()
+jogos_manuais_raw = conn_tmp.execute(
     "SELECT id, liga, data, casa, fora FROM jogos_manuais WHERE status='SCHEDULED' ORDER BY data"
 ).fetchall()
-get_connection().close()
+conn_tmp.close()
 
 jogos_manuais = [{
     "id": f"manual_{r['id']}", "liga": r["liga"], "data": r["data"],
@@ -91,12 +93,12 @@ jogos_manuais = [{
     "odds_casa": None, "odds_empate": None, "odds_fora": None,
 } for r in jogos_manuais_raw]
 
-# Mescla odds das ligas europeias
+# Mescla odds
 odds_map = carregar_odds(ODDS_API_KEY)
 for j in jogos_api:
     _mesclar_odds(j, odds_map)
 
-# Calcula odds do Brasileirão pela tabela ESPN
+# Odds Brasileirão via tabela ESPN
 tabela_br, _ = carregar_standings_brasileirao()
 standings_br  = {t["Time"]: t for t in (tabela_br or [])}
 for j in jogos_brasileirao:
@@ -120,42 +122,43 @@ if not todos_jogos:
     st.stop()
 
 palpites_atuais = palpites_do_usuario(usuario)
-saldo, em_jogo  = info_moedas(usuario)
+saldo, em_jogo  = info_ec(usuario)
 
 ids_no_form = {j["id"] for j in todos_jogos}
 conn_tmp    = get_connection()
-moedas_outros_jogos = conn_tmp.execute(
-    "SELECT COUNT(*) as c FROM palpites WHERE usuario=? AND moeda_apostada=1 AND pontos IS NULL AND jogo_id NOT IN ({})".format(
+ec_outros   = float(conn_tmp.execute(
+    "SELECT COALESCE(SUM(moeda_apostada),0) as c FROM palpites WHERE usuario=? AND moeda_apostada>0 AND pontos IS NULL AND jogo_id NOT IN ({})".format(
         ",".join("?" * len(ids_no_form))
     ),
     (usuario, *ids_no_form),
-).fetchone()["c"]
+).fetchone()["c"])
 conn_tmp.close()
 
-col_info, col_saldo = st.columns([3, 1])
-col_info.markdown(f"**{len(todos_jogos)} jogos disponíveis nos próximos 7 dias**")
-col_saldo.info(f"🪙 Disponível: **{saldo - moedas_outros_jogos}**")
+ec_disponivel = saldo - ec_outros
 
-# Agrupa por liga
+col_j, col_ec = st.columns([3, 1])
+col_j.markdown(f"**{len(todos_jogos)} jogos disponíveis nos próximos 7 dias**")
+col_ec.info(f"💰 Saldo livre: **{ec_disponivel:.2f} EC**")
+
 ligas = {}
 for jogo in todos_jogos:
     ligas.setdefault(jogo["liga"], []).append(jogo)
 
-conn      = get_connection()
-salvos    = 0
+conn       = get_connection()
+salvos     = 0
 erros_form = []
 
 with st.form("form_palpites"):
-    novos_palpites = {}
-    moedas_no_form = {}
+    novos_palpites  = {}
+    apostas_no_form = {}
 
     for nome_liga, jogos in ligas.items():
         st.subheader(nome_liga)
 
         for jogo in jogos:
             jid      = jogo["id"]
-            exist    = palpites_atuais.get(jid, (0, 0, False))
-            ja_moeda = exist[2]
+            exist    = palpites_atuais.get(jid, (0, 0, 0))
+            aposta_atual = int(exist[2]) if exist[2] else 0
 
             try:
                 dt       = datetime.fromisoformat(jogo["data"].replace("Z", "+00:00"))
@@ -163,15 +166,14 @@ with st.form("form_palpites"):
             except Exception:
                 data_fmt = jogo["data"]
 
-            oc  = _fmt_odd(jogo.get("odds_casa"))
-            oe  = _fmt_odd(jogo.get("odds_empate"))
-            of_ = _fmt_odd(jogo.get("odds_fora"))
+            oc   = _fmt_odd(jogo.get("odds_casa"))
+            oe   = _fmt_odd(jogo.get("odds_empate"))
+            of_  = _fmt_odd(jogo.get("odds_fora"))
             tem_odds = jogo.get("odds_casa") is not None
-            odds_txt = f"🏠 {oc} · ➖ {oe} · ✈️ {of_}" if tem_odds else "odds indisponíveis"
-
+            odds_str = f"🏠 {oc} · ➖ {oe} · ✈️ {of_}" if tem_odds else "odds indisponíveis"
             badge = " ✏️" if jid in palpites_atuais else ""
 
-            col_lc, col_info, col_gc, col_x, col_gf, col_lf, col_moeda = st.columns([0.5, 3.5, 1, 0.4, 1, 0.5, 1.2])
+            col_lc, col_info, col_gc, col_x, col_gf, col_lf, col_ec_in = st.columns([0.5, 3.5, 1, 0.4, 1, 0.5, 1.5])
 
             with col_lc:
                 if jogo.get("logo_casa"):
@@ -179,7 +181,7 @@ with st.form("form_palpites"):
 
             with col_info:
                 st.markdown(f"**{jogo['casa']} x {jogo['fora']}**{badge}")
-                st.caption(f"{data_fmt} · {odds_txt}")
+                st.caption(f"{data_fmt} · {odds_str}")
 
             with col_gc:
                 gc = st.number_input(
@@ -197,28 +199,28 @@ with st.form("form_palpites"):
                 if jogo.get("logo_fora"):
                     st.image(jogo["logo_fora"], width=36)
 
-            with col_moeda:
-                moeda = st.checkbox(
-                    "🪙 Apostar", value=ja_moeda, key=f"moeda_{jid}",
-                    help="Apostar 1 moeda — ganho multiplicado pela odd do resultado" if tem_odds
-                         else "Odd indisponível — ganho baseado apenas nos pontos",
+            with col_ec_in:
+                aposta = st.number_input(
+                    "💰 EC", min_value=0, max_value=int(saldo),
+                    value=aposta_atual, step=1, key=f"aposta_{jid}",
+                    help="Elevação Coins a apostar neste jogo",
                 )
 
-            novos_palpites[jid] = (jogo, gc, gf)
-            moedas_no_form[jid] = moeda
+            novos_palpites[jid]  = (jogo, gc, gf)
+            apostas_no_form[jid] = aposta
 
         st.divider()
 
     submitted = st.form_submit_button("Salvar todos os palpites", use_container_width=True, type="primary")
 
 if submitted:
-    total_apostas = sum(1 for m in moedas_no_form.values() if m) + moedas_outros_jogos
-    if total_apostas > saldo:
-        st.error(f"Moedas insuficientes! Saldo: {saldo}, apostando em: {total_apostas} jogos.")
+    total_apostado = sum(apostas_no_form.values()) + ec_outros
+    if total_apostado > saldo:
+        st.error(f"EC insuficiente! Saldo: {saldo:.2f} EC · Apostando: {total_apostado:.2f} EC")
     else:
         for jid, (jogo, gc, gf) in novos_palpites.items():
-            moeda = 1 if moedas_no_form[jid] else 0
-            odd   = _odd_apostada(gc, gf, jogo.get("odds_casa"), jogo.get("odds_empate"), jogo.get("odds_fora"))
+            aposta = apostas_no_form[jid]
+            odd    = _odd_apostada(gc, gf, jogo.get("odds_casa"), jogo.get("odds_empate"), jogo.get("odds_fora"))
             try:
                 conn.execute(
                     """INSERT INTO palpites
@@ -226,16 +228,16 @@ if submitted:
                         moeda_apostada, odds_casa, odds_empate, odds_fora, odd_apostada)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(usuario, jogo_id) DO UPDATE SET
-                           palpite_casa  = excluded.palpite_casa,
-                           palpite_fora  = excluded.palpite_fora,
+                           palpite_casa   = excluded.palpite_casa,
+                           palpite_fora   = excluded.palpite_fora,
                            moeda_apostada = excluded.moeda_apostada,
-                           odds_casa     = excluded.odds_casa,
-                           odds_empate   = excluded.odds_empate,
-                           odds_fora     = excluded.odds_fora,
-                           odd_apostada  = excluded.odd_apostada
+                           odds_casa      = excluded.odds_casa,
+                           odds_empate    = excluded.odds_empate,
+                           odds_fora      = excluded.odds_fora,
+                           odd_apostada   = excluded.odd_apostada
                     """,
                     (usuario, jid, jogo["label"], jogo["liga"], gc, gf,
-                     moeda, jogo.get("odds_casa"), jogo.get("odds_empate"),
+                     aposta, jogo.get("odds_casa"), jogo.get("odds_empate"),
                      jogo.get("odds_fora"), odd),
                 )
                 salvos += 1
@@ -246,10 +248,10 @@ if submitted:
         if erros_form:
             st.error(f"Erros: {erros_form}")
         else:
-            apostas = sum(1 for m in moedas_no_form.values() if m)
+            total_apostando = sum(apostas_no_form.values())
             msg = f"{salvos} palpites salvos!"
-            if apostas:
-                msg += f" 🪙 {apostas} moeda(s) em jogo."
+            if total_apostando:
+                msg += f" · 💰 {total_apostando:.0f} EC em jogo."
             st.success(msg)
             st.rerun()
 

@@ -69,8 +69,14 @@ def init_db():
             pass
 
     try:
-        cursor.execute("ALTER TABLE usuarios ADD COLUMN saldo_moedas INTEGER DEFAULT 10")
-        cursor.execute("UPDATE usuarios SET saldo_moedas = 10 WHERE saldo_moedas IS NULL")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN saldo_ec REAL DEFAULT 10.0")
+        cursor.execute("UPDATE usuarios SET saldo_ec = 10.0 WHERE saldo_ec IS NULL")
+    except Exception:
+        pass
+
+    # Migração: se coluna antiga existe, copia saldo para nova coluna
+    try:
+        cursor.execute("UPDATE usuarios SET saldo_ec = CAST(saldo_moedas AS REAL) WHERE saldo_ec = 10.0 AND saldo_moedas != 10")
     except Exception:
         pass
 

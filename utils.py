@@ -10,15 +10,18 @@ AVATARES = [
 DEFAULT_AVATAR = "⚽"
 
 
-def _info_moedas(usuario):
-    conn    = get_connection()
-    row     = conn.execute("SELECT saldo_moedas FROM usuarios WHERE nome=?", (usuario,)).fetchone()
+def _info_ec(usuario):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT COALESCE(saldo_ec, saldo_moedas, 10) as saldo FROM usuarios WHERE nome=?",
+        (usuario,),
+    ).fetchone()
     em_jogo = conn.execute(
-        "SELECT COUNT(*) as c FROM palpites WHERE usuario=? AND moeda_apostada=1 AND pontos IS NULL",
+        "SELECT COALESCE(SUM(moeda_apostada), 0) as c FROM palpites WHERE usuario=? AND moeda_apostada > 0 AND pontos IS NULL",
         (usuario,),
     ).fetchone()["c"]
     conn.close()
-    return (row["saldo_moedas"] if row else 10), em_jogo
+    return float(row["saldo"] if row else 10.0), float(em_jogo)
 
 
 def get_avatar(usuario):
@@ -46,10 +49,10 @@ def sidebar_login():
             )
             st.success(f"Olá, **{usuario}**!")
 
-            saldo, em_jogo = _info_moedas(usuario)
+            saldo, em_jogo = _info_ec(usuario)
             col1, col2 = st.columns(2)
-            col1.metric("🪙 Saldo",  saldo)
-            col2.metric("Em jogo", em_jogo)
+            col1.metric("💰 Saldo EC", f"{saldo:.2f}")
+            col2.metric("Em jogo", f"{em_jogo:.2f}")
 
             if st.button("Sair", use_container_width=True):
                 del st.session_state["usuario"]
