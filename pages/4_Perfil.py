@@ -1,7 +1,7 @@
 import streamlit as st
 from database import get_connection, init_db
 from scoring import fmt_ec
-from utils import sidebar_login, get_avatar, AVATARES
+from utils import sidebar_login, get_avatar, AVATARES, _info_ec
 
 st.set_page_config(page_title="Perfil", page_icon="👤", layout="wide")
 
@@ -19,14 +19,8 @@ if not usuario:
     st.info("Faça login na barra lateral para acessar seu perfil.")
     st.stop()
 
-conn = get_connection()
-row  = conn.execute(
-    "SELECT COALESCE(saldo_ec, saldo_moedas, 10) as saldo, avatar_style FROM usuarios WHERE nome=?",
-    (usuario,),
-).fetchone()
-conn.close()
-
-saldo  = float(row["saldo"] if row else 10.0)
+saldo_total, em_jogo = _info_ec(usuario)
+saldo  = max(saldo_total - em_jogo, 0)  # disponível = total − em jogo
 avatar = get_avatar(usuario)
 
 # ── Avatar atual ──────────────────────────────────────────────────────────────
@@ -38,7 +32,9 @@ with col_av:
     )
 with col_info:
     st.markdown(f"### {usuario}")
-    st.markdown(f"💰 **Saldo Elevação Coin:** {saldo:.2f} EC")
+    col_s1, col_s2 = st.columns(2)
+    col_s1.metric("💰 Disponível", f"{saldo:.2f} EC")
+    col_s2.metric("Em jogo", f"{em_jogo:.2f} EC")
 
 st.divider()
 
