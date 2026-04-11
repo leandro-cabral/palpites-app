@@ -18,11 +18,15 @@ st.title("🏆 Ranking")
 
 conn = get_connection()
 
-# ── Ranking geral ────────────────────────────────────────────────────────────
+# ── Ranking geral ─────────────────────────────────────────────────────────────
 rows = conn.execute("""
     SELECT
         p.usuario,
         COALESCE(u.saldo_ec, u.saldo_moedas, 10) AS saldo_ec,
+        COALESCE((
+            SELECT SUM(moeda_apostada) FROM palpites
+            WHERE usuario = p.usuario AND moeda_apostada > 0 AND pontos IS NULL
+        ), 0) AS ec_em_jogo,
         COUNT(*) AS total_palpites,
         SUM(CASE WHEN p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS jogos_avaliados,
         COALESCE(SUM(p.pontos), 0) AS total_pontos,
@@ -30,12 +34,11 @@ rows = conn.execute("""
         SUM(CASE WHEN p.pontos = 2 THEN 1 ELSE 0 END) AS empates_certos,
         SUM(CASE WHEN p.pontos = 1 THEN 1 ELSE 0 END) AS resultados_certos,
         SUM(CASE WHEN p.pontos = 0 THEN 1 ELSE 0 END) AS erros,
-        SUM(CASE WHEN p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS apostas_resolvidas,
+        SUM(CASE WHEN p.moeda_apostada > 0 AND p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS apostas_resolvidas,
         COALESCE(SUM(p.moedas_ganhas), 0) AS ec_ganhos_total
     FROM palpites p
     LEFT JOIN usuarios u ON p.usuario = u.nome
     GROUP BY p.usuario
-    ORDER BY total_pontos DESC, placares_exatos DESC
 """).fetchall()
 
 if not rows:
@@ -43,43 +46,52 @@ if not rows:
     conn.close()
     st.stop()
 
+# Calcula score e ordena em Python (saldo_disponivel não é trivial em SQL puro)
+dados = []
+for r in rows:
+    saldo_disp = max(float(r["saldo_ec"]) - float(r["ec_em_jogo"]), 0)
+    score      = round(r["total_pontos"] * saldo_disp, 2)
+    dados.append({**dict(r), "saldo_disponivel": saldo_disp, "score": score})
+
+dados.sort(key=lambda x: (x["score"], x["total_pontos"], x["placares_exatos"]), reverse=True)
+
 # Tabela de ranking
-df = pd.DataFrame([dict(r) for r in rows])
-df["avatar"] = df["usuario"].apply(get_avatar)
+df = pd.DataFrame(dados)
+df["avatar"]  = df["usuario"].apply(get_avatar)
 df["Jogador"] = df["avatar"] + " " + df["usuario"]
-df.index = range(1, len(df) + 1)
+df.index      = range(1, len(df) + 1)
 df.index.name = "Pos"
 
-df_display = df.rename(columns={
-    "usuario": "_usuario",
-    "saldo_ec": "💰 Saldo EC",
-    "total_pontos": "Pts",
-    "jogos_avaliados": "Avaliados",
-    "total_palpites": "Palpites",
-    "placares_exatos": "Exatos (3pts)",
-    "empates_certos": "Empates (2pts)",
+df_display = df[["Jogador", "score", "total_pontos", "saldo_disponivel",
+                  "jogos_avaliados", "placares_exatos", "empates_certos",
+                  "resultados_certos", "erros", "ec_ganhos_total"]].rename(columns={
+    "score":             "⭐ Score",
+    "total_pontos":      "Pts",
+    "saldo_disponivel":  "💰 Banca",
+    "jogos_avaliados":   "Avaliados",
+    "placares_exatos":   "Exatos (3pts)",
+    "empates_certos":    "Empates (2pts)",
     "resultados_certos": "Vencedor (1pt)",
-    "erros": "Erros",
-    "apostas_resolvidas": "Apostas",
-    "ec_ganhos_total": "💰 EC Ganhos",
+    "erros":             "Erros",
+    "ec_ganhos_total":   "💰 EC Ganhos",
 })
 
 # Destaque para o líder
-if len(df_display) > 0:
-    lider = df_display.iloc[0]
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Lider", lider["Jogador"])
-    col2.metric("Pontos", int(lider["Pts"]))
-    col3.metric("Placares exatos", int(lider["Exatos (3pts)"]))
-    col4.metric("💰 Saldo EC", f"{float(lider['💰 Saldo EC']):.2f}")
+lider = df_display.iloc[0]
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Líder", lider["Jogador"])
+col2.metric("⭐ Score", f"{lider['⭐ Score']:.1f}")
+col3.metric("Pts", int(lider["Pts"]))
+col4.metric("💰 Banca", f"{lider['💰 Banca']:.2f} EC")
 
+st.caption("Score = Pontos × Banca disponível em EC")
 st.divider()
 st.dataframe(df_display, use_container_width=True)
 
-# ── Detalhes por jogador ─────────────────────────────────────────────────────
+# ── Detalhes por jogador ──────────────────────────────────────────────────────
 st.subheader("Detalhes por jogador")
 
-jogadores = [r["usuario"] for r in rows]
+jogadores = [r["usuario"] for r in dados]
 jogador_sel = st.selectbox("Selecionar jogador", jogadores)
 
 palpites = conn.execute("""
@@ -99,24 +111,24 @@ if palpites:
             if p["gols_casa_real"] is not None else "—"
         )
         odd_txt = f"{p['odd_apostada']:.2f}" if p["odd_apostada"] else "—"
-        ec_txt = (
+        ec_txt  = (
             f"{p['moedas_ganhas']:+.2f}" if p["moedas_ganhas"] is not None
             else f"{p['moeda_apostada']:.2f} em jogo"
         )
         rows_detail.append({
-            "Jogo": p["jogo"],
-            "Liga": p["liga"] or "—",
-            "Palpite": f"{p['palpite_casa']}x{p['palpite_fora']}",
-            "Resultado": resultado_real,
-            "Pts": p["pontos"] if p["pontos"] is not None else "—",
-            "Status": DESCRICAO_PONTOS.get(p["pontos"], "Aguardando") if p["pontos"] is not None else "Aguardando",
+            "Jogo":        p["jogo"],
+            "Liga":        p["liga"] or "—",
+            "Palpite":     f"{p['palpite_casa']}x{p['palpite_fora']}",
+            "Resultado":   resultado_real,
+            "Pts":         p["pontos"] if p["pontos"] is not None else "—",
+            "Status":      DESCRICAO_PONTOS.get(p["pontos"], "Aguardando") if p["pontos"] is not None else "Aguardando",
             "EC apostado": f"{p['moeda_apostada']:.2f}",
-            "Odd": odd_txt,
+            "Odd":         odd_txt,
             "EC resultado": ec_txt,
         })
 
     st.dataframe(pd.DataFrame(rows_detail), use_container_width=True, hide_index=True)
 else:
-    st.info("Nenhum palpite encontrado.")
+    st.info("Nenhum palpite com EC encontrado.")
 
 conn.close()
