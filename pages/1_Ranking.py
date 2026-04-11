@@ -34,7 +34,6 @@ rows = conn.execute("""
         COALESCE(SUM(p.moedas_ganhas), 0) AS ec_ganhos_total
     FROM palpites p
     LEFT JOIN usuarios u ON p.usuario = u.nome
-    WHERE p.moeda_apostada > 0
     GROUP BY p.usuario
     ORDER BY total_pontos DESC, placares_exatos DESC
 """).fetchall()
@@ -88,7 +87,7 @@ palpites = conn.execute("""
            gols_casa_real, gols_fora_real, pontos,
            moeda_apostada, moedas_ganhas, odd_apostada
     FROM palpites
-    WHERE usuario = ? AND moeda_apostada > 0
+    WHERE usuario = ?
     ORDER BY id DESC
 """, (jogador_sel,)).fetchall()
 
