@@ -1,6 +1,6 @@
 import streamlit as st
 from datetime import datetime
-from api import get_jogos
+from api import get_jogos, get_jogos_espn
 from database import get_connection, init_db
 from utils import sidebar_login
 
@@ -13,6 +13,10 @@ init_db()
 @st.cache_data(ttl=3600)
 def carregar_jogos_api():
     return get_jogos(API_KEY, dias_a_frente=7)
+
+@st.cache_data(ttl=3600)
+def carregar_jogos_brasileirao():
+    return get_jogos_espn(dias_a_frente=7)
 
 
 def carregar_jogos_manuais():
@@ -68,8 +72,9 @@ if not usuario:
     st.stop()
 
 jogos_api, erros = carregar_jogos_api()
+jogos_brasileirao = carregar_jogos_brasileirao()
 jogos_manuais = carregar_jogos_manuais()
-todos_jogos = jogos_api + jogos_manuais
+todos_jogos = jogos_api + jogos_brasileirao + jogos_manuais
 
 if erros:
     with st.expander("Avisos da API"):

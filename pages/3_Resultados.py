@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from api import get_resultados
+from api import get_resultados, get_resultados_espn
 from database import get_connection, init_db
 from scoring import calcular_pontos, calcular_moedas_ganhas, DESCRICAO_PONTOS
 from utils import sidebar_login
@@ -89,6 +89,7 @@ with tab_processar:
     if st.button("Processar resultados da API", type="primary"):
         with st.spinner("Buscando resultados..."):
             jogos_fin, erros = get_resultados(API_KEY, days_back=14)
+            jogos_fin += get_resultados_espn(days_back=14)
 
         if erros:
             for e in erros:

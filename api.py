@@ -2,6 +2,8 @@ import requests
 from datetime import datetime, timedelta
 
 BASE_URL = "https://api.football-data.org/v4"
+ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+ESPN_BASE_V2 = "https://site.api.espn.com/apis/v2/sports/soccer"
 
 # Competições disponíveis no plano free da football-data.org
 LIGAS = {
@@ -10,6 +12,11 @@ LIGAS = {
     "Serie A": "SA",
     "Bundesliga": "BL1",
     "Champions League": "CL",
+}
+
+# Ligas ESPN (sem autenticação)
+LIGAS_ESPN = {
+    "Brasileirão": "bra.1",
 }
 
 
@@ -109,6 +116,136 @@ def get_resultados(api_key, days_back=7):
 
     return jogos, erros
 
+
+# ── ESPN (Brasileirão) ────────────────────────────────────────────────────────
+
+def get_jogos_espn(dias_a_frente=7):
+    """Retorna jogos agendados do Brasileirão via ESPN."""
+    hoje = datetime.today()
+    jogos = []
+
+    for i in range(dias_a_frente + 1):
+        data = (hoje + timedelta(days=i)).strftime("%Y%m%d")
+        try:
+            r = requests.get(
+                f"{ESPN_BASE}/bra.1/scoreboard",
+                params={"dates": data},
+                timeout=10,
+            )
+            if not r.ok:
+                continue
+
+            for evento in r.json().get("events", []):
+                comp = evento["competitions"][0]
+                status = comp["status"]["type"]["name"]
+
+                if status != "STATUS_SCHEDULED":
+                    continue
+
+                times = {t["homeAway"]: t for t in comp["competitors"]}
+                casa = times["home"]["team"]["shortDisplayName"]
+                fora = times["away"]["team"]["shortDisplayName"]
+
+                jogos.append({
+                    "id": f"espn_{evento['id']}",
+                    "liga": "Brasileirão",
+                    "data": comp["date"],
+                    "casa": casa,
+                    "fora": fora,
+                    "label": f"[Brasileirão] {casa} x {fora}",
+                    "fonte": "espn",
+                })
+
+        except requests.exceptions.RequestException:
+            pass
+
+    return jogos
+
+
+def get_resultados_espn(days_back=7):
+    """Retorna resultados finalizados do Brasileirão via ESPN."""
+    hoje = datetime.today()
+    jogos = []
+
+    for i in range(1, days_back + 1):
+        data = (hoje - timedelta(days=i)).strftime("%Y%m%d")
+        try:
+            r = requests.get(
+                f"{ESPN_BASE}/bra.1/scoreboard",
+                params={"dates": data},
+                timeout=10,
+            )
+            if not r.ok:
+                continue
+
+            for evento in r.json().get("events", []):
+                comp = evento["competitions"][0]
+                status = comp["status"]["type"]["name"]
+
+                if status != "STATUS_FINAL":
+                    continue
+
+                times = {t["homeAway"]: t for t in comp["competitors"]}
+                casa = times["home"]["team"]["shortDisplayName"]
+                fora = times["away"]["team"]["shortDisplayName"]
+                gc = int(times["home"].get("score", 0))
+                gf = int(times["away"].get("score", 0))
+
+                jogos.append({
+                    "id": f"espn_{evento['id']}",
+                    "liga": "Brasileirão",
+                    "data": comp["date"],
+                    "casa": casa,
+                    "fora": fora,
+                    "gols_casa": gc,
+                    "gols_fora": gf,
+                    "label": f"[Brasileirão] {casa} {gc}x{gf} {fora}",
+                    "fonte": "espn",
+                })
+
+        except requests.exceptions.RequestException:
+            pass
+
+    return jogos
+
+
+def get_standings_espn():
+    """Retorna classificação do Brasileirão via ESPN."""
+    try:
+        r = requests.get(f"{ESPN_BASE_V2}/bra.1/standings", timeout=10)
+        if not r.ok:
+            return None, f"Erro {r.status_code}"
+
+        entries = []
+        for child in r.json().get("children", []):
+            entries = child.get("standings", {}).get("entries", [])
+            if entries:
+                break
+
+        tabela = []
+        for i, entry in enumerate(entries, 1):
+            stats = {s["name"]: s.get("value", 0) for s in entry.get("stats", [])}
+            tabela.append({
+                "Pos": int(stats.get("rank", i)),
+                "Time": entry["team"]["shortDisplayName"],
+                "Pts": int(stats.get("points", 0)),
+                "J": int(stats.get("gamesPlayed", 0)),
+                "V": int(stats.get("wins", 0)),
+                "E": int(stats.get("ties", 0)),
+                "D": int(stats.get("losses", 0)),
+                "GP": int(stats.get("pointsFor", 0)),
+                "GC": int(stats.get("pointsAgainst", 0)),
+                "SG": int(stats.get("pointDifferential", 0)),
+            })
+
+        tabela.sort(key=lambda x: x["Pos"])
+        return tabela, None
+
+    except requests.exceptions.RequestException as e:
+        return None, str(e)
+
+
+# ── football-data.org ─────────────────────────────────────────────────────────
 
 def get_standings(api_key, competition_code):
     """Retorna (tabela, erro) com a classificação de uma competição."""

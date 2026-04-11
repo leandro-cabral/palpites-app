@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from api import get_standings, get_resultados, LIGAS
+from api import get_standings, get_resultados, get_standings_espn, get_resultados_espn, LIGAS
 from database import init_db
 from utils import sidebar_login
 
@@ -19,18 +19,26 @@ sidebar_login()
 
 st.title("📊 Ligas")
 
-liga_sel = st.selectbox("Selecionar liga", list(LIGAS.keys()))
-codigo = LIGAS[liga_sel]
+todas_ligas = ["Brasileirão"] + list(LIGAS.keys())
+liga_sel = st.selectbox("Selecionar liga", todas_ligas)
+is_brasileirao = liga_sel == "Brasileirão"
 
 tab_class, tab_resultados = st.tabs(["Classificação", "Resultados Recentes"])
 
 # ── Classificação ────────────────────────────────────────────────────────────
 with tab_class:
-    @st.cache_data(ttl=1800, show_spinner="Carregando classificação...")
-    def _standings(key, code):
-        return get_standings(key, code)
+    if is_brasileirao:
+        @st.cache_data(ttl=1800, show_spinner="Carregando classificação...")
+        def _standings_br():
+            return get_standings_espn()
 
-    tabela, erro = _standings(API_KEY, codigo)
+        tabela, erro = _standings_br()
+    else:
+        @st.cache_data(ttl=1800, show_spinner="Carregando classificação...")
+        def _standings(key, code):
+            return get_standings(key, code)
+
+        tabela, erro = _standings(API_KEY, LIGAS[liga_sel])
 
     if erro:
         st.error(f"Erro ao carregar classificação: {erro}")
@@ -42,15 +50,22 @@ with tab_class:
 
 # ── Resultados recentes ──────────────────────────────────────────────────────
 with tab_resultados:
-    @st.cache_data(ttl=900, show_spinner="Carregando resultados...")
-    def _resultados(key, days):
-        return get_resultados(key, days_back=days)
-
     dias = st.slider("Quantos dias para trás", 1, 14, 7)
-    jogos, erros = _resultados(API_KEY, dias)
 
-    # Filtra pela liga selecionada
-    jogos_liga = [j for j in jogos if j["liga"] == liga_sel]
+    if is_brasileirao:
+        @st.cache_data(ttl=900, show_spinner="Carregando resultados...")
+        def _resultados_br(days):
+            return get_resultados_espn(days_back=days)
+
+        jogos_liga = _resultados_br(dias)
+        erros = []
+    else:
+        @st.cache_data(ttl=900, show_spinner="Carregando resultados...")
+        def _resultados(key, days):
+            return get_resultados(key, days_back=days)
+
+        jogos_todos, erros = _resultados(API_KEY, dias)
+        jogos_liga = [j for j in jogos_todos if j["liga"] == liga_sel]
 
     if erros:
         for e in erros:
