@@ -60,12 +60,6 @@ def _fmt_odd(v):
     return f"{v:.2f}" if v else "—"
 
 
-def _logo_html(url, size=28):
-    if not url:
-        return ""
-    return f'<img src="{url}" width="{size}" height="{size}" style="border-radius:4px;vertical-align:middle;margin:0 4px">'
-
-
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("⚽ Palpites")
@@ -169,41 +163,45 @@ with st.form("form_palpites"):
             except Exception:
                 data_fmt = jogo["data"]
 
-            # Linha de odds
             oc  = _fmt_odd(jogo.get("odds_casa"))
             oe  = _fmt_odd(jogo.get("odds_empate"))
             of_ = _fmt_odd(jogo.get("odds_fora"))
-            odds_txt = f"🏠 {oc} &nbsp;·&nbsp; ➖ {oe} &nbsp;·&nbsp; ✈️ {of_}"
+            tem_odds = jogo.get("odds_casa") is not None
+            odds_txt = f"🏠 {oc} · ➖ {oe} · ✈️ {of_}" if tem_odds else "odds indisponíveis"
 
-            # Logos inline
-            logo_c = _logo_html(jogo.get("logo_casa"))
-            logo_f = _logo_html(jogo.get("logo_fora"))
-            badge  = " ✏️" if jid in palpites_atuais else ""
+            badge = " ✏️" if jid in palpites_atuais else ""
 
-            col_info, col_gc, col_x, col_gf, col_moeda = st.columns([4, 1, 0.4, 1, 1.2])
+            col_lc, col_info, col_gc, col_x, col_gf, col_lf, col_moeda = st.columns([0.5, 3.5, 1, 0.4, 1, 0.5, 1.2])
+
+            with col_lc:
+                if jogo.get("logo_casa"):
+                    st.image(jogo["logo_casa"], width=36)
 
             with col_info:
-                st.markdown(
-                    f"{logo_c}**{jogo['casa']}** x **{jogo['fora']}**{logo_f}{badge}  \n"
-                    f"<small style='color:gray'>{data_fmt} &nbsp;|&nbsp; {odds_txt}</small>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"**{jogo['casa']} x {jogo['fora']}**{badge}")
+                st.caption(f"{data_fmt} · {odds_txt}")
+
             with col_gc:
                 gc = st.number_input(
                     jogo["casa"], min_value=0, max_value=20,
                     value=exist[0], step=1, key=f"casa_{jid}", label_visibility="collapsed",
                 )
             with col_x:
-                st.markdown("<div style='text-align:center;padding-top:8px'>x</div>", unsafe_allow_html=True)
+                st.markdown("<div style='text-align:center;padding-top:6px'>x</div>", unsafe_allow_html=True)
             with col_gf:
                 gf = st.number_input(
                     jogo["fora"], min_value=0, max_value=20,
                     value=exist[1], step=1, key=f"fora_{jid}", label_visibility="collapsed",
                 )
+            with col_lf:
+                if jogo.get("logo_fora"):
+                    st.image(jogo["logo_fora"], width=36)
+
             with col_moeda:
                 moeda = st.checkbox(
                     "🪙 Apostar", value=ja_moeda, key=f"moeda_{jid}",
-                    help="Apostar 1 moeda — ganho multiplicado pela odd do resultado",
+                    help="Apostar 1 moeda — ganho multiplicado pela odd do resultado" if tem_odds
+                         else "Odd indisponível — ganho baseado apenas nos pontos",
                 )
 
             novos_palpites[jid] = (jogo, gc, gf)

@@ -1,24 +1,18 @@
 import streamlit as st
 from database import get_connection
 
-AVATAR_STYLES = {
-    "Personagem":  "avataaars",
-    "Robô":        "bottts",
-    "Pixel Art":   "pixel-art",
-    "Emoji":       "fun-emoji",
-    "Ilustrado":   "lorelei",
-    "Aventureiro": "adventurer",
-    "Minimalista": "micah",
-}
+AVATARES = [
+    "⚽", "🏆", "👑", "🔥", "⚡", "🎯", "💎", "🌟",
+    "🦁", "🐯", "🦊", "🐺", "🦅", "🦈", "🐊", "🦝",
+    "🤠", "😎", "🥷", "🤖", "👾", "🎭", "🧙", "🏴‍☠️",
+]
 
-
-def avatar_url(nome, style="avataaars", size=64):
-    return f"https://api.dicebear.com/9.x/{style}/png?seed={nome}&size={size}"
+DEFAULT_AVATAR = "⚽"
 
 
 def _info_moedas(usuario):
     conn    = get_connection()
-    row     = conn.execute("SELECT saldo_moedas FROM usuarios WHERE nome = ?", (usuario,)).fetchone()
+    row     = conn.execute("SELECT saldo_moedas FROM usuarios WHERE nome=?", (usuario,)).fetchone()
     em_jogo = conn.execute(
         "SELECT COUNT(*) as c FROM palpites WHERE usuario=? AND moeda_apostada=1 AND pontos IS NULL",
         (usuario,),
@@ -27,11 +21,13 @@ def _info_moedas(usuario):
     return (row["saldo_moedas"] if row else 10), em_jogo
 
 
-def _get_style(usuario):
-    conn  = get_connection()
-    row   = conn.execute("SELECT avatar_style FROM usuarios WHERE nome=?", (usuario,)).fetchone()
+def get_avatar(usuario):
+    conn = get_connection()
+    row  = conn.execute("SELECT avatar_style FROM usuarios WHERE nome=?", (usuario,)).fetchone()
     conn.close()
-    return row["avatar_style"] if row and row["avatar_style"] else "avataaars"
+    style = row["avatar_style"] if row and row["avatar_style"] else DEFAULT_AVATAR
+    # Retorna DEFAULT se o valor salvo for um estilo DiceBear antigo
+    return style if style in AVATARES else DEFAULT_AVATAR
 
 
 def sidebar_login():
@@ -42,9 +38,12 @@ def sidebar_login():
 
         if st.session_state.get("usuario"):
             usuario = st.session_state["usuario"]
-            style   = _get_style(usuario)
+            avatar  = get_avatar(usuario)
 
-            st.image(avatar_url(usuario, style, 80), width=80)
+            st.markdown(
+                f"<div style='font-size:64px;text-align:center'>{avatar}</div>",
+                unsafe_allow_html=True,
+            )
             st.success(f"Olá, **{usuario}**!")
 
             saldo, em_jogo = _info_moedas(usuario)

@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from database import get_connection, init_db
-from utils import sidebar_login
+from utils import sidebar_login, get_avatar
 from scoring import DESCRICAO_PONTOS
 
 st.set_page_config(page_title="Ranking", page_icon="🏆", layout="wide")
@@ -45,11 +45,13 @@ if not rows:
 
 # Tabela de ranking
 df = pd.DataFrame([dict(r) for r in rows])
+df["avatar"] = df["usuario"].apply(get_avatar)
+df["Jogador"] = df["avatar"] + " " + df["usuario"]
 df.index = range(1, len(df) + 1)
 df.index.name = "Pos"
 
 df_display = df.rename(columns={
-    "usuario": "Jogador",
+    "usuario": "_usuario",
     "saldo_moedas": "🪙 Saldo",
     "total_pontos": "Pts",
     "jogos_avaliados": "Avaliados",
