@@ -30,7 +30,12 @@ with tab_resultados:
     def _resultados_api(key):
         return get_resultados(key, days_back=7)
 
+    @st.cache_data(ttl=900)
+    def _resultados_espn():
+        return get_resultados_espn(days_back=7)
+
     jogos, erros = _resultados_api(API_KEY)
+    jogos += _resultados_espn()
 
     if erros:
         with st.expander("Avisos"):
@@ -60,24 +65,31 @@ with tab_resultados:
     if not jogos:
         st.info("Nenhum resultado disponível nos últimos 7 dias.")
     else:
-        for j in sorted(jogos, key=lambda x: x["data"], reverse=True):
-            try:
-                dt = datetime.fromisoformat(j["data"].replace("Z", "+00:00"))
-                data_fmt = dt.strftime("%d/%m/%Y")
-            except Exception:
-                data_fmt = j["data"]
+        # Agrupa por liga
+        ligas_res = {}
+        for j in jogos:
+            if j.get("gols_casa") is not None and j.get("gols_fora") is not None:
+                ligas_res.setdefault(j["liga"], []).append(j)
 
-            gc, gf = j["gols_casa"], j["gols_fora"]
-            col_data, col_liga, col_jogo = st.columns([1, 1, 4])
-            col_data.caption(data_fmt)
-            col_liga.caption(j["liga"])
-            if gc is not None and gf is not None:
+        for liga, jogos_liga in ligas_res.items():
+            st.subheader(liga)
+            for j in sorted(jogos_liga, key=lambda x: x["data"], reverse=True):
+                try:
+                    dt = datetime.fromisoformat(j["data"].replace("Z", "+00:00"))
+                    data_fmt = dt.strftime("%d/%m %H:%M")
+                except Exception:
+                    data_fmt = j["data"]
+
+                gc, gf = j["gols_casa"], j["gols_fora"]
+                col_data, col_jogo = st.columns([1, 5])
+                col_data.caption(data_fmt)
                 if gc > gf:
                     col_jogo.markdown(f"**{j['casa']}** {gc} x {gf} {j['fora']}")
                 elif gf > gc:
                     col_jogo.markdown(f"{j['casa']} {gc} x {gf} **{j['fora']}**")
                 else:
                     col_jogo.markdown(f"{j['casa']} **{gc} x {gf}** {j['fora']}")
+            st.divider()
 
 # ── Processar pontos ─────────────────────────────────────────────────────────
 with tab_processar:
