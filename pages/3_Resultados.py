@@ -32,7 +32,7 @@ with tab_resultados:
 
     @st.cache_data(ttl=900)
     def _resultados_espn():
-        return get_resultados_espn(days_back=7)
+        return get_resultados_espn(days_back=14)
 
     jogos, erros = _resultados_api(API_KEY)
     jogos += _resultados_espn()
