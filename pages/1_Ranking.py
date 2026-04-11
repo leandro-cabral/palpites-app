@@ -87,7 +87,7 @@ palpites = conn.execute("""
            gols_casa_real, gols_fora_real, pontos,
            moeda_apostada, moedas_ganhas, odd_apostada
     FROM palpites
-    WHERE usuario = ?
+    WHERE usuario = ? AND moeda_apostada > 0
     ORDER BY id DESC
 """, (jogador_sel,)).fetchall()
 
