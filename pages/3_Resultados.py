@@ -220,6 +220,7 @@ with tab_admin:
     st.divider()
     st.subheader("Jogos manuais cadastrados")
 
+
     conn = get_connection()
     todos_manuais = conn.execute(
         "SELECT id, liga, data, casa, fora, status, gols_casa, gols_fora FROM jogos_manuais ORDER BY data DESC"
@@ -239,3 +240,21 @@ with tab_admin:
         )
     else:
         st.info("Nenhum jogo manual cadastrado ainda.")
+
+    # ── Reset completo do banco ───────────────────────────────────────────────
+    st.divider()
+    st.subheader("⚠️ Zona de perigo")
+    ADMIN_PWD = st.secrets.get("ADMIN_PASSWORD", "")
+    with st.expander("Resetar banco de dados"):
+        pwd_input = st.text_input("Senha admin", type="password", key="reset_pwd")
+        if st.button("Apagar todos usuários e palpites", type="primary"):
+            if not ADMIN_PWD or pwd_input != ADMIN_PWD:
+                st.error("Senha incorreta.")
+            else:
+                conn = get_connection()
+                conn.execute("DELETE FROM palpites")
+                conn.execute("DELETE FROM usuarios")
+                conn.commit()
+                conn.close()
+                st.success("Banco resetado. Todos os usuários e palpites foram apagados.")
+                st.rerun()

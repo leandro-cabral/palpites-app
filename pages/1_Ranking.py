@@ -30,10 +30,11 @@ rows = conn.execute("""
         SUM(CASE WHEN p.pontos = 2 THEN 1 ELSE 0 END) AS empates_certos,
         SUM(CASE WHEN p.pontos = 1 THEN 1 ELSE 0 END) AS resultados_certos,
         SUM(CASE WHEN p.pontos = 0 THEN 1 ELSE 0 END) AS erros,
-        SUM(CASE WHEN p.moeda_apostada > 0 AND p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS apostas_resolvidas,
-        COALESCE(SUM(CASE WHEN p.moeda_apostada > 0 THEN p.moedas_ganhas ELSE 0 END), 0) AS ec_ganhos_total
+        SUM(CASE WHEN p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS apostas_resolvidas,
+        COALESCE(SUM(p.moedas_ganhas), 0) AS ec_ganhos_total
     FROM palpites p
     LEFT JOIN usuarios u ON p.usuario = u.nome
+    WHERE p.moeda_apostada > 0
     GROUP BY p.usuario
     ORDER BY total_pontos DESC, placares_exatos DESC
 """).fetchall()
@@ -84,9 +85,10 @@ jogador_sel = st.selectbox("Selecionar jogador", jogadores)
 
 palpites = conn.execute("""
     SELECT jogo, liga, palpite_casa, palpite_fora,
-           gols_casa_real, gols_fora_real, pontos
+           gols_casa_real, gols_fora_real, pontos,
+           moeda_apostada, moedas_ganhas, odd_apostada
     FROM palpites
-    WHERE usuario = ?
+    WHERE usuario = ? AND moeda_apostada > 0
     ORDER BY id DESC
 """, (jogador_sel,)).fetchall()
 
@@ -97,6 +99,11 @@ if palpites:
             f"{p['gols_casa_real']}x{p['gols_fora_real']}"
             if p["gols_casa_real"] is not None else "—"
         )
+        odd_txt = f"{p['odd_apostada']:.2f}" if p["odd_apostada"] else "—"
+        ec_txt = (
+            f"{p['moedas_ganhas']:+.2f}" if p["moedas_ganhas"] is not None
+            else f"{p['moeda_apostada']:.2f} em jogo"
+        )
         rows_detail.append({
             "Jogo": p["jogo"],
             "Liga": p["liga"] or "—",
@@ -104,6 +111,9 @@ if palpites:
             "Resultado": resultado_real,
             "Pts": p["pontos"] if p["pontos"] is not None else "—",
             "Status": DESCRICAO_PONTOS.get(p["pontos"], "Aguardando") if p["pontos"] is not None else "Aguardando",
+            "EC apostado": f"{p['moeda_apostada']:.2f}",
+            "Odd": odd_txt,
+            "EC resultado": ec_txt,
         })
 
     st.dataframe(pd.DataFrame(rows_detail), use_container_width=True, hide_index=True)

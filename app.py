@@ -124,21 +124,11 @@ if not todos_jogos:
 palpites_atuais = palpites_do_usuario(usuario)
 saldo, em_jogo  = info_ec(usuario)
 
-ids_no_form = {j["id"] for j in todos_jogos}
-conn_tmp    = get_connection()
-ec_outros   = float(conn_tmp.execute(
-    "SELECT COALESCE(SUM(moeda_apostada),0) as c FROM palpites WHERE usuario=? AND moeda_apostada>0 AND pontos IS NULL AND jogo_id NOT IN ({})".format(
-        ",".join("?" * len(ids_no_form))
-    ),
-    (usuario, *ids_no_form),
-).fetchone()["c"])
-conn_tmp.close()
-
-ec_disponivel = saldo - ec_outros
+ec_disponivel = saldo - em_jogo  # saldo livre = total − tudo em jogo
 
 col_j, col_ec = st.columns([3, 1])
 col_j.markdown(f"**{len(todos_jogos)} jogos disponíveis nos próximos 7 dias**")
-col_ec.info(f"💰 Saldo livre: **{ec_disponivel:.2f} EC**")
+col_ec.info(f"💰 Disponível: **{ec_disponivel:.2f} EC**")
 
 ligas = {}
 for jogo in todos_jogos:
@@ -156,9 +146,10 @@ with st.form("form_palpites"):
         st.subheader(nome_liga)
 
         for jogo in jogos:
-            jid      = jogo["id"]
-            exist    = palpites_atuais.get(jid, (0, 0, 0))
-            aposta_atual = int(exist[2]) if exist[2] else 0
+            jid          = jogo["id"]
+            exist        = palpites_atuais.get(jid, (0, 0, 0))
+            aposta_atual = float(exist[2]) if exist[2] else 0.0
+            locked       = aposta_atual > 0  # palpite com aposta não pode ser alterado
 
             try:
                 dt       = datetime.fromisoformat(jogo["data"].replace("Z", "+00:00"))
@@ -171,7 +162,7 @@ with st.form("form_palpites"):
             of_  = _fmt_odd(jogo.get("odds_fora"))
             tem_odds = jogo.get("odds_casa") is not None
             odds_str = f"🏠 {oc} · ➖ {oe} · ✈️ {of_}" if tem_odds else "odds indisponíveis"
-            badge = " ✏️" if jid in palpites_atuais else ""
+            badge = " 🔒" if locked else (" ✏️" if jid in palpites_atuais else "")
 
             col_lc, col_info, col_gc, col_x, col_gf, col_lf, col_ec_in = st.columns([0.5, 3.5, 1, 0.4, 1, 0.5, 1.5])
 
@@ -186,14 +177,16 @@ with st.form("form_palpites"):
             with col_gc:
                 gc = st.number_input(
                     jogo["casa"], min_value=0, max_value=20,
-                    value=exist[0], step=1, key=f"casa_{jid}", label_visibility="collapsed",
+                    value=exist[0], step=1, key=f"casa_{jid}",
+                    label_visibility="collapsed", disabled=locked,
                 )
             with col_x:
                 st.markdown("<div style='text-align:center;padding-top:6px'>x</div>", unsafe_allow_html=True)
             with col_gf:
                 gf = st.number_input(
                     jogo["fora"], min_value=0, max_value=20,
-                    value=exist[1], step=1, key=f"fora_{jid}", label_visibility="collapsed",
+                    value=exist[1], step=1, key=f"fora_{jid}",
+                    label_visibility="collapsed", disabled=locked,
                 )
             with col_lf:
                 if jogo.get("logo_fora"):
@@ -201,26 +194,39 @@ with st.form("form_palpites"):
 
             with col_ec_in:
                 aposta = st.number_input(
-                    "💰 EC", min_value=0, max_value=int(saldo),
-                    value=aposta_atual, step=1, key=f"aposta_{jid}",
+                    "💰 EC", min_value=0, max_value=int(ec_disponivel + aposta_atual),
+                    value=int(aposta_atual), step=1, key=f"aposta_{jid}",
                     help="Elevação Coins a apostar neste jogo",
+                    disabled=locked,
                 )
 
             novos_palpites[jid]  = (jogo, gc, gf)
-            apostas_no_form[jid] = aposta
+            apostas_no_form[jid] = aposta_atual if locked else aposta
 
         st.divider()
 
     submitted = st.form_submit_button("Salvar todos os palpites", use_container_width=True, type="primary")
 
 if submitted:
-    total_apostado = sum(apostas_no_form.values()) + ec_outros
-    if total_apostado > saldo:
-        st.error(f"EC insuficiente! Saldo: {saldo:.2f} EC · Apostando: {total_apostado:.2f} EC")
+    # Apenas palpites não travados (sem aposta já feita) serão processados
+    palpites_livres = {
+        jid: dados for jid, dados in novos_palpites.items()
+        if apostas_no_form[jid] == palpites_atuais.get(jid, (0, 0, 0))[2]
+        or palpites_atuais.get(jid, (0, 0, 0))[2] == 0
+    }
+    novos_ec_no_form = sum(
+        apostas_no_form[jid] for jid in palpites_livres
+        if palpites_atuais.get(jid, (0, 0, 0))[2] == 0
+    )
+    if novos_ec_no_form > ec_disponivel:
+        st.error(f"EC insuficiente! Disponível: {ec_disponivel:.2f} EC · Apostando agora: {novos_ec_no_form:.2f} EC")
     else:
         for jid, (jogo, gc, gf) in novos_palpites.items():
             aposta = apostas_no_form[jid]
-            odd    = _odd_apostada(gc, gf, jogo.get("odds_casa"), jogo.get("odds_empate"), jogo.get("odds_fora"))
+            locked = palpites_atuais.get(jid, (0, 0, 0))[2] > 0
+            if locked:
+                continue  # palpite com aposta: não altera nada
+            odd = _odd_apostada(gc, gf, jogo.get("odds_casa"), jogo.get("odds_empate"), jogo.get("odds_fora"))
             try:
                 conn.execute(
                     """INSERT INTO palpites
@@ -248,10 +254,9 @@ if submitted:
         if erros_form:
             st.error(f"Erros: {erros_form}")
         else:
-            total_apostando = sum(apostas_no_form.values())
-            msg = f"{salvos} palpites salvos!"
-            if total_apostando:
-                msg += f" · 💰 {total_apostando:.0f} EC em jogo."
+            msg = f"{salvos} palpite(s) salvo(s)!"
+            if novos_ec_no_form:
+                msg += f" · 💰 {novos_ec_no_form:.2f} EC apostado."
             st.success(msg)
             st.rerun()
 
