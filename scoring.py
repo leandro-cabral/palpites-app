@@ -34,3 +34,17 @@ DESCRICAO_PONTOS = {
     1: "Vencedor certo",
     0: "Errou",
 }
+
+
+def calcular_moedas_ganhas(pontos, moeda_apostada):
+    """
+    Retorna o delta de moedas ao processar um resultado.
+      pontos > 0 → ganha `pontos` moedas
+      pontos = 0 → perde 1 moeda
+      moeda não apostada → 0
+    """
+    if not moeda_apostada:
+        return 0
+    if pontos == 0:
+        return -1
+    return pontos

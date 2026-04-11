@@ -2,6 +2,18 @@ import streamlit as st
 from database import get_connection
 
 
+def _info_moedas(usuario):
+    conn = get_connection()
+    row = conn.execute("SELECT saldo_moedas FROM usuarios WHERE nome = ?", (usuario,)).fetchone()
+    em_jogo = conn.execute(
+        "SELECT COUNT(*) as c FROM palpites WHERE usuario = ? AND moeda_apostada = 1 AND pontos IS NULL",
+        (usuario,),
+    ).fetchone()["c"]
+    conn.close()
+    saldo = row["saldo_moedas"] if row else 10
+    return saldo, em_jogo
+
+
 def sidebar_login():
     """
     Exibe login/cadastro na sidebar.
@@ -12,11 +24,18 @@ def sidebar_login():
         st.subheader("Usuário")
 
         if st.session_state.get("usuario"):
-            st.success(f"Olá, **{st.session_state.usuario}**!")
+            usuario = st.session_state["usuario"]
+            st.success(f"Olá, **{usuario}**!")
+
+            saldo, em_jogo = _info_moedas(usuario)
+            col1, col2 = st.columns(2)
+            col1.metric("🪙 Saldo", saldo)
+            col2.metric("Em jogo", em_jogo)
+
             if st.button("Sair", use_container_width=True):
                 del st.session_state["usuario"]
                 st.rerun()
-            return st.session_state["usuario"]
+            return usuario
 
         nome = st.text_input("Seu nome", placeholder="Digite seu nome")
 

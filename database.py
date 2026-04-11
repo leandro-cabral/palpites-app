@@ -60,11 +60,19 @@ def init_db():
         "ALTER TABLE palpites ADD COLUMN gols_fora_real INTEGER",
         "ALTER TABLE palpites ADD COLUMN pontos INTEGER",
         "ALTER TABLE palpites ADD COLUMN criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE palpites ADD COLUMN moeda_apostada INTEGER DEFAULT 0",
+        "ALTER TABLE palpites ADD COLUMN moedas_ganhas INTEGER",
     ]:
         try:
             cursor.execute(col_sql)
         except Exception:
             pass
+
+    try:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN saldo_moedas INTEGER DEFAULT 10")
+        cursor.execute("UPDATE usuarios SET saldo_moedas = 10 WHERE saldo_moedas IS NULL")
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()

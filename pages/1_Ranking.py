@@ -21,16 +21,20 @@ conn = get_connection()
 # ── Ranking geral ────────────────────────────────────────────────────────────
 rows = conn.execute("""
     SELECT
-        usuario,
+        p.usuario,
+        u.saldo_moedas,
         COUNT(*) AS total_palpites,
-        SUM(CASE WHEN pontos IS NOT NULL THEN 1 ELSE 0 END) AS jogos_avaliados,
-        COALESCE(SUM(pontos), 0) AS total_pontos,
-        SUM(CASE WHEN pontos = 3 THEN 1 ELSE 0 END) AS placares_exatos,
-        SUM(CASE WHEN pontos = 2 THEN 1 ELSE 0 END) AS empates_certos,
-        SUM(CASE WHEN pontos = 1 THEN 1 ELSE 0 END) AS resultados_certos,
-        SUM(CASE WHEN pontos = 0 THEN 1 ELSE 0 END) AS erros
-    FROM palpites
-    GROUP BY usuario
+        SUM(CASE WHEN p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS jogos_avaliados,
+        COALESCE(SUM(p.pontos), 0) AS total_pontos,
+        SUM(CASE WHEN p.pontos = 3 THEN 1 ELSE 0 END) AS placares_exatos,
+        SUM(CASE WHEN p.pontos = 2 THEN 1 ELSE 0 END) AS empates_certos,
+        SUM(CASE WHEN p.pontos = 1 THEN 1 ELSE 0 END) AS resultados_certos,
+        SUM(CASE WHEN p.pontos = 0 THEN 1 ELSE 0 END) AS erros,
+        SUM(CASE WHEN p.moeda_apostada = 1 AND p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS apostas_resolvidas,
+        COALESCE(SUM(CASE WHEN p.moeda_apostada = 1 THEN p.moedas_ganhas ELSE 0 END), 0) AS moedas_ganhas_total
+    FROM palpites p
+    LEFT JOIN usuarios u ON p.usuario = u.nome
+    GROUP BY p.usuario
     ORDER BY total_pontos DESC, placares_exatos DESC
 """).fetchall()
 
@@ -46,6 +50,7 @@ df.index.name = "Pos"
 
 df_display = df.rename(columns={
     "usuario": "Jogador",
+    "saldo_moedas": "🪙 Saldo",
     "total_pontos": "Pts",
     "jogos_avaliados": "Avaliados",
     "total_palpites": "Palpites",
@@ -53,15 +58,18 @@ df_display = df.rename(columns={
     "empates_certos": "Empates (2pts)",
     "resultados_certos": "Vencedor (1pt)",
     "erros": "Erros",
+    "apostas_resolvidas": "Apostas",
+    "moedas_ganhas_total": "🪙 Ganhas",
 })
 
 # Destaque para o líder
 if len(df_display) > 0:
     lider = df_display.iloc[0]
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Lider", lider["Jogador"])
     col2.metric("Pontos", int(lider["Pts"]))
     col3.metric("Placares exatos", int(lider["Exatos (3pts)"]))
+    col4.metric("🪙 Saldo", int(lider["🪙 Saldo"]))
 
 st.divider()
 st.dataframe(df_display, use_container_width=True)
