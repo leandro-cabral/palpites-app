@@ -85,6 +85,11 @@ def init_db():
     except Exception:
         pass
 
+    try:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN senha_hash TEXT")
+    except Exception:
+        pass
+
     for col_sql in [
         "ALTER TABLE palpites ADD COLUMN odds_casa REAL",
         "ALTER TABLE palpites ADD COLUMN odds_empate REAL",
