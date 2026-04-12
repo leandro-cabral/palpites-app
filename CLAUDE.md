@@ -79,7 +79,8 @@ Jogadores iniciam com `10.0 EC` (coluna `saldo_ec` na tabela `usuarios`).
 | `odds_empate` | REAL | Odd do empate |
 | `odds_fora` | REAL | Odd do time visitante |
 | `odd_apostada` | REAL | Odd do resultado apostado |
-| `criado_em` | TIMESTAMPTZ DEFAULT NOW() | Data do palpite |
+| `criado_em` | TIMESTAMPTZ DEFAULT NOW() | Data do palpite (UTC) |
+| `criado_em_brt` | TEXT | Data do palpite em horário de Brasília (ex: "12/04/2026 17:01") |
 
 > A combinação `(usuario, jogo_id)` é UNIQUE — cada jogador tem um palpite por jogo.
 
@@ -91,6 +92,9 @@ Jogadores iniciam com `10.0 EC` (coluna `saldo_ec` na tabela `usuarios`).
 - **Nunca use SQLite.** O projeto usa PostgreSQL via Supabase. Não use o módulo nativo `sqlite3`.
 - **Placeholders SQL:** O `ConnectionWrapper` em `database.py` converte automaticamente `?` → `%s`. Nas queries Python, use `?` — o wrapper trata a conversão. Nunca use f-strings para interpolar variáveis em SQL (risco de SQL Injection).
 - **Conexões:** Sempre feche a conexão (`conn.close()`) antes de chamar `st.rerun()` para evitar connection leaks.
+- **Odds — fonte única:** `jogos.odds_casa/empate/fora` é a fonte de verdade. Bot atualiza a cada 3h via `atualizar_odds`; app preenche com COALESCE (não sobrescreve). App e Discord sempre leem odds do banco.
+- **Horários:** `data` e `criado_em` armazenados em UTC. Colunas `data_brt` (jogos) e `criado_em_brt` (palpites) guardam o horário de Brasília como TEXT via `to_char(... AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI')`.
+- **Ranking:** Score = `total_pontos × saldo_ec`. Conta **todos** os palpites (não filtrar por `moeda_apostada > 0`).
 
 ### Frontend
 - Priorize injeção de HTML/CSS com temática "Dark Mode / Duna" usando `st.markdown(unsafe_allow_html=True)` ou `st.components.v1.html()`.
@@ -144,9 +148,9 @@ Todas estão em `.streamlit/secrets.toml`.
 ### Tasks automáticas
 
 **`checar_lembretes`** (a cada 15 min):
-- Busca jogos `SCHEDULED` com `lembrete_enviado = FALSE` que começam entre 2h e 3h a partir de agora
-- Posta embed listando quem ainda não apostou
-- Marca `lembrete_enviado = TRUE`
+- **Lembrete 2h:** jogos `SCHEDULED` com `lembrete_enviado = FALSE` que começam entre 2h e 3h → embed laranja
+- **Lembrete 1h:** jogos `SCHEDULED` com `lembrete_1h_enviado = FALSE` que começam entre 1h e 2h → embed vermelho
+- Ambos listam quem já apostou e quem não apostou ainda
 
 **`checar_resultados`** (a cada 5 min):
 - ESPN: chamado a cada execução (5 min); football-data.org: a cada 6 execuções (30 min) — evita estourar rate limit do plano free
@@ -178,9 +182,11 @@ As funções `calcular_pontos`, `calcular_ec_ganhos` e `is_surrealidade` estão 
 | `liga` | TEXT | Nome da liga |
 | `casa` / `fora` | TEXT | Nomes dos times |
 | `data` | TIMESTAMPTZ | Horário do jogo (UTC) |
+| `data_brt` | TEXT | Horário do jogo em Brasília (ex: "15/04/2026 17:30") |
 | `logo_casa` / `logo_fora` | TEXT | URLs dos escudos |
 | `gols_casa` / `gols_fora` | INTEGER | Resultado final (NULL enquanto não finalizado) |
-| `odds_casa` / `odds_empate` / `odds_fora` | REAL | Odds atualizadas pela task `atualizar_odds` |
+| `odds_casa` / `odds_empate` / `odds_fora` | REAL | Fonte única de odds — bot atualiza a cada 3h, app preenche se NULL |
 | `status` | TEXT | `'SCHEDULED'` ou `'FINISHED'` |
-| `lembrete_enviado` | BOOLEAN | Controle de lembrete pré-jogo |
+| `lembrete_enviado` | BOOLEAN | Controle de lembrete 2h pré-jogo |
+| `lembrete_1h_enviado` | BOOLEAN | Controle de lembrete 1h pré-jogo |
 | `resultado_notificado` | BOOLEAN | Controle de notificação pós-jogo |
