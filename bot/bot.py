@@ -214,7 +214,7 @@ def get_resultados_espn(days_back=2):
                 continue
             for evento in r.json().get("events", []):
                 comp   = evento["competitions"][0]
-                if comp["status"]["type"]["name"] != "STATUS_FINAL":
+                if comp["status"]["type"]["name"] not in ("STATUS_FINAL", "STATUS_FULL_TIME"):
                     continue
                 times = {t["homeAway"]: t for t in comp["competitors"]}
                 jogos.append({
