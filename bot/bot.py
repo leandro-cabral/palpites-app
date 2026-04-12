@@ -33,7 +33,7 @@ async def on_ready():
 
 # ── Task 1: Lembrete 2h antes do jogo ────────────────────────────────────────
 
-@tasks.loop(minutes=1)
+@tasks.loop(minutes=15)
 async def checar_lembretes():
     channel = client.get_channel(CHANNEL_ID)
     if not channel:
