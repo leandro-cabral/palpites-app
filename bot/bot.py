@@ -11,6 +11,7 @@ from discord import app_commands
 
 DISCORD_TOKEN  = os.environ["DISCORD_TOKEN"]
 CHANNEL_ID     = int(os.environ["DISCORD_CHANNEL_ID"])
+GUILD_ID       = int(os.environ["DISCORD_GUILD_ID"])
 DATABASE_URL   = os.environ["DATABASE_URL"]
 API_KEY        = os.environ.get("API_KEY", "")
 ODDS_API_KEY   = os.environ.get("ODDS_API_KEY", "")
@@ -405,7 +406,9 @@ def fmt_brt(dt_utc):
 @client.event
 async def on_ready():
     print(f"Bot online: {client.user}")
-    await tree.sync()
+    guild = discord.Object(id=GUILD_ID)
+    tree.copy_global_to(guild=guild)
+    await tree.sync(guild=guild)
     print("Slash commands sincronizados.")
     checar_lembretes.start()
     checar_resultados.start()
@@ -455,7 +458,7 @@ class ApostarModal(discord.ui.Modal):
 
 class JogosView(discord.ui.View):
     def __init__(self, jogos: list):
-        super().__init__(timeout=300)
+        super().__init__(timeout=3600)
         for j in jogos[:25]:
             label    = f"⚽  {j['casa']} x {j['fora']}"[:80]
             jogo_id  = j["id"]
@@ -517,6 +520,59 @@ async def _enviar_resultado_aposta(interaction, result, placar_casa, placar_fora
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+# ── Slash: /ranking ──────────────────────────────────────────────────────────
+
+def _db_buscar_ranking():
+    conn = get_conn()
+    c    = cur(conn)
+    c.execute("""
+        SELECT p.usuario,
+               COALESCE(SUM(p.pontos), 0)                          AS total_pontos,
+               COUNT(CASE WHEN p.pontos IN (4.5, 9.0) THEN 1 END)  AS placares_exatos,
+               COUNT(CASE WHEN p.pontos IS NOT NULL THEN 1 END)     AS jogos_avaliados,
+               u.saldo_ec,
+               COALESCE(SUM(CASE WHEN p.pontos IS NULL THEN p.moeda_apostada ELSE 0 END), 0) AS ec_em_jogo
+        FROM palpites p
+        JOIN usuarios u ON p.usuario = u.nome
+        GROUP BY p.usuario, u.saldo_ec
+        ORDER BY (COALESCE(SUM(p.pontos), 0) * u.saldo_ec) DESC,
+                 COALESCE(SUM(p.pontos), 0) DESC,
+                 COUNT(CASE WHEN p.pontos IN (4.5, 9.0) THEN 1 END) DESC
+    """)
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+@tree.command(name="ranking", description="Mostra o ranking Lisan al Gaib atual")
+async def cmd_ranking(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=False)
+    ranking = await asyncio.to_thread(_db_buscar_ranking)
+
+    if not ranking:
+        await interaction.followup.send("Nenhum dado de ranking ainda.")
+        return
+
+    medals = ["🥇", "🥈", "🥉"]
+    linhas = []
+    for i, r in enumerate(ranking):
+        medal  = medals[i] if i < 3 else f"**{i+1}.**"
+        score  = round(r["total_pontos"] * r["saldo_ec"], 2)
+        linhas.append(
+            f"{medal} **{r['usuario']}**\n"
+            f"┣ ⭐ Score: `{score}` · 📊 `{r['total_pontos']} pts`\n"
+            f"┣ 🎯 Placares exatos: `{r['placares_exatos']}` · 🎮 Jogos: `{r['jogos_avaliados']}`\n"
+            f"┗ 💰 Banca: `{r['saldo_ec']:.2f} EC`"
+        )
+
+    embed = discord.Embed(
+        title="🏆 Ranking Lisan al Gaib",
+        description="\n\n".join(linhas),
+        color=0xeab308,
+    )
+    embed.set_footer(text="Score = Pontos × Banca Disponível")
+    await interaction.followup.send(embed=embed)
+
+
 # ── Slash: /vincular ──────────────────────────────────────────────────────────
 
 @tree.command(name="vincular", description="Vincula sua conta do app ao Discord")
@@ -564,7 +620,7 @@ async def cmd_jogos(interaction: discord.Interaction):
         )
 
     embed.set_footer(text="Clique em um jogo abaixo para apostar")
-    await interaction.followup.send(embed=embed, view=JogosView(jogos), ephemeral=True)
+    await interaction.edit_original_response(embed=embed, view=JogosView(jogos))
 
 
 # ── Autocomplete de jogos ─────────────────────────────────────────────────────
@@ -667,14 +723,25 @@ async def checar_lembretes():
 
 # ── Task 2: Busca resultados, processa e notifica ─────────────────────────────
 
+_fd_check_counter = 0
+
 @tasks.loop(minutes=5)
 async def checar_resultados():
+    global _fd_check_counter
     channel = client.get_channel(CHANNEL_ID)
     if not channel:
         return
 
     try:
-        jogos_finais = get_resultados_espn(days_back=2) + get_resultados_fd(days_back=2)
+        # ESPN: toda execução (a cada 5 min)
+        # football-data.org: a cada 6 execuções (30 min) — evita estourar rate limit do plano free
+        _fd_check_counter += 1
+        espn_jogos = await asyncio.to_thread(get_resultados_espn, 2)
+        fd_jogos   = await asyncio.to_thread(get_resultados_fd, 2) if _fd_check_counter >= 6 else []
+        if _fd_check_counter >= 6:
+            _fd_check_counter = 0
+
+        jogos_finais = espn_jogos + fd_jogos
 
         conn = get_conn()
         c    = cur(conn)
