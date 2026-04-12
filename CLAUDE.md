@@ -123,17 +123,23 @@ Todas estão em `.streamlit/secrets.toml`.
 - Operações de banco rodam em `asyncio.to_thread` para não bloquear o event loop
 
 **`/jogos`**
-- Lista os próximos 10 jogos com horário BRT e odds (🏠 casa · ✏️ empate · ✈️ fora)
-- Exibe botões interativos (`discord.ui.Button`) — um por jogo
+- Lista os próximos jogos com horário BRT e odds (🏠 casa · ✏️ empate · ✈️ fora)
+- Exibe botões interativos (`discord.ui.Button`) — um por jogo (timeout=3600s)
 - Ao clicar no botão, abre um **Modal** (`discord.ui.Modal`) com campos:
   - Gols — Time da Casa
   - Gols — Time Visitante
   - Valor apostado em EC
 - Ao confirmar o modal, registra o palpite e mostra confirmação com odd e lucro potencial
+- Usa `edit_original_response` (não `followup.send`) para garantir que botões aparecem na primeira chamada
 
 **`/apostar <jogo> <placar_casa> <placar_fora> <valor>`**
 - Alternativa via texto com autocomplete para o campo `jogo`
 - Mesma lógica e validações do modal
+
+**`/ranking`**
+- Mostra o ranking Lisan al Gaib público (não ephemeral) com embed
+- Score = `total_pontos × saldo_ec`
+- Exibe: medal, score, pontos, placares exatos, jogos avaliados, banca
 
 ### Tasks automáticas
 
@@ -143,7 +149,7 @@ Todas estão em `.streamlit/secrets.toml`.
 - Marca `lembrete_enviado = TRUE`
 
 **`checar_resultados`** (a cada 5 min):
-- Busca resultados nas APIs (ESPN + football-data.org) — últimos 2 dias
+- ESPN: chamado a cada execução (5 min); football-data.org: a cada 6 execuções (30 min) — evita estourar rate limit do plano free
 - Fallback: também processa jogos já `FINISHED` no banco com `resultado_notificado = FALSE`
 - Calcula pontos e EC dos palpites (`pontos IS NULL`)
 - Atualiza `palpites`, `usuarios.saldo_ec`, e faz UPSERT em `jogos` com `status='FINISHED'`
@@ -156,6 +162,11 @@ Todas estão em `.streamlit/secrets.toml`.
 
 > O bot não depende de ninguém clicar "Processar resultados" no app — ele processa tudo sozinho.
 > Todas as queries de banco nos comandos slash usam `asyncio.to_thread` para não bloquear o event loop.
+
+### Sync de slash commands
+- Comandos sincronizados por **guild específico** (`GUILD_ID`) no `on_ready` para propagação instantânea
+- Comandos globais são limpos no startup para evitar duplicatas no cliente Discord
+- Ordem obrigatória: `tree.copy_global_to(guild)` → `tree.sync(guild)` → `tree.clear_commands(guild=None)` → `tree.sync()`
 
 ### Scoring e EC (espelhado de `scoring.py`)
 As funções `calcular_pontos`, `calcular_ec_ganhos` e `is_surrealidade` estão duplicadas diretamente no `bot.py` para o bot rodar de forma independente.
