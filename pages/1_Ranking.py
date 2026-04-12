@@ -38,6 +38,7 @@ rows = conn.execute("""
         COALESCE(SUM(p.moedas_ganhas), 0) AS ec_ganhos_total
     FROM palpites p
     LEFT JOIN usuarios u ON p.usuario = u.nome
+    WHERE p.moeda_apostada > 0
     GROUP BY p.usuario
 """).fetchall()
 

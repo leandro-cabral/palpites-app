@@ -127,10 +127,9 @@ saldo, em_jogo  = info_ec(usuario)
 # Inicializa session_state para valores de EC (permite cálculo dinâmico)
 for jogo in todos_jogos:
     jid = jogo["id"]
-    chave = f"aposta_{jid}"
-    if chave not in st.session_state:
-        exist = palpites_atuais.get(jid, (0, 0, 0))
-        st.session_state[chave] = int(exist[2]) if exist[2] else 0
+    if f"aposta_{jid}" not in st.session_state:
+        exist = palpites_atuais.get(jid, (None, None, 0))
+        st.session_state[f"aposta_{jid}"] = int(exist[2]) if exist[2] else 0
 
 # EC apostado via apostas já salvas no DB (travadas)
 ec_ja_apostado = sum(
@@ -176,8 +175,8 @@ for nome_liga, jogos in ligas.items():
 
     for jogo in jogos:
         jid          = jogo["id"]
-        exist        = palpites_atuais.get(jid, (0, 0, 0))
-        aposta_atual = float(exist[2]) if exist[2] else 0.0
+        exist        = palpites_atuais.get(jid)          # None se não palpitou
+        aposta_atual = float(exist[2]) if exist and exist[2] else 0.0
 
         # Trava se já apostou OU se o jogo já começou
         try:
@@ -216,19 +215,25 @@ for nome_liga, jogos in ligas.items():
             st.markdown(f"**{jogo['casa']}**{badge}")
             st.caption(f"{data_fmt} · {odds_str}")
 
+        # Valor padrão: existente se já apostou (locked), senão vazio (None)
+        gc_default = exist[0] if locked and exist else None
+        gf_default = exist[1] if locked and exist else None
+
         with col_gc:
             gc = st.number_input(
                 jogo["casa"], min_value=0, max_value=20,
-                value=exist[0], step=1, key=f"casa_{jid}",
+                value=gc_default, step=1, key=f"casa_{jid}",
                 label_visibility="collapsed", disabled=locked,
+                placeholder="—",
             )
         with col_x:
             st.markdown("<div style='text-align:center;padding-top:6px'>x</div>", unsafe_allow_html=True)
         with col_gf:
             gf = st.number_input(
                 jogo["fora"], min_value=0, max_value=20,
-                value=exist[1], step=1, key=f"fora_{jid}",
+                value=gf_default, step=1, key=f"fora_{jid}",
                 label_visibility="collapsed", disabled=locked,
+                placeholder="—",
             )
 
         with col_fora:
@@ -258,20 +263,37 @@ conn       = get_connection()
 salvos     = 0
 erros_form = []
 
-if st.button("Salvar todos os palpites", use_container_width=True, type="primary"):
-    novos_ec_total = sum(
-        apostas_no_form[jid]
-        for jid in novos_palpites
-        if palpites_atuais.get(jid, (0, 0, 0))[2] == 0
-    )
-    if novos_ec_total > (saldo - ec_ja_apostado):
+if st.button("Salvar palpites", use_container_width=True, type="primary"):
+    # Apenas jogos novos (não travados) com EC > 0 e placar preenchido
+    para_salvar = []
+    avisos      = []
+
+    for jid, (jogo, gc, gf) in novos_palpites.items():
+        aposta = apostas_no_form[jid]
+        locked = (palpites_atuais.get(jid) or (None, None, 0))[2] > 0
+        if locked:
+            continue
+        if aposta == 0 and (gc is not None or gf is not None):
+            avisos.append(f"**{jogo['casa']} x {jogo['fora']}**: placar preenchido sem EC — ignorado.")
+            continue
+        if aposta > 0 and (gc is None or gf is None):
+            avisos.append(f"**{jogo['casa']} x {jogo['fora']}**: EC apostado mas placar vazio — preencha o placar.")
+            continue
+        if aposta == 0:
+            continue  # sem EC e sem placar — simplesmente ignora
+        para_salvar.append((jid, jogo, gc, gf, aposta))
+
+    novos_ec_total = sum(a for _, _, _, _, a in para_salvar)
+
+    for aviso in avisos:
+        st.warning(aviso)
+
+    if avisos and not para_salvar:
+        pass  # nada a salvar, avisos já mostrados
+    elif novos_ec_total > (saldo - ec_ja_apostado):
         st.error(f"EC insuficiente! Disponível: {saldo - ec_ja_apostado:.2f} EC · Apostando: {novos_ec_total:.2f} EC")
     else:
-        for jid, (jogo, gc, gf) in novos_palpites.items():
-            aposta = apostas_no_form[jid]
-            locked = palpites_atuais.get(jid, (0, 0, 0))[2] > 0
-            if locked:
-                continue
+        for jid, jogo, gc, gf, aposta in para_salvar:
             odd = _odd_apostada(gc, gf, jogo.get("odds_casa"), jogo.get("odds_empate"), jogo.get("odds_fora"))
             try:
                 conn.execute(
@@ -299,12 +321,9 @@ if st.button("Salvar todos os palpites", use_container_width=True, type="primary
         conn.commit()
         if erros_form:
             st.error(f"Erros: {erros_form}")
-        else:
-            msg = f"{salvos} palpite(s) salvo(s)!"
-            if novos_ec_total:
-                msg += f" · 💰 {novos_ec_total:.2f} EC apostado."
+        elif salvos:
+            msg = f"{salvos} palpite(s) salvo(s)! · 💰 {novos_ec_total:.2f} EC apostado."
             st.success(msg)
-            # Limpa session_state dos inputs para forçar recarga
             for jid in novos_palpites:
                 st.session_state.pop(f"aposta_{jid}", None)
                 st.session_state.pop(f"casa_{jid}", None)
