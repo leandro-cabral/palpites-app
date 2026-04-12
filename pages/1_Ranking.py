@@ -29,10 +29,6 @@ rows = conn.execute("""
     SELECT
         p.usuario,
         COALESCE(MAX(u.saldo_ec), 10) AS saldo_ec,
-        COALESCE((
-            SELECT SUM(moeda_apostada) FROM palpites
-            WHERE usuario = p.usuario AND moeda_apostada > 0 AND pontos IS NULL
-        ), 0) AS ec_em_jogo,
         COUNT(*) AS total_palpites,
         SUM(CASE WHEN p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS jogos_avaliados,
         COALESCE(SUM(p.pontos), 0) AS total_pontos,
@@ -44,7 +40,6 @@ rows = conn.execute("""
         COALESCE(SUM(p.moedas_ganhas), 0) AS ec_ganhos_total
     FROM palpites p
     LEFT JOIN usuarios u ON p.usuario = u.nome
-    WHERE p.moeda_apostada > 0
     GROUP BY p.usuario
 """).fetchall()
 
@@ -57,7 +52,7 @@ if not rows:
 dados = []
 for r in rows:
     saldo_disp = max(float(r["saldo_ec"]), 0)
-    score      = calcular_score_ranking(r["total_pontos"], r["saldo_ec"], 0)
+    score      = round(float(r["total_pontos"]) * saldo_disp, 2)
     dados.append({**dict(r), "saldo_disponivel": saldo_disp, "score": score})
 
 dados = ordenar_ranking(dados)
