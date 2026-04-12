@@ -124,12 +124,21 @@ if not todos_jogos:
 palpites_atuais = palpites_do_usuario(usuario)
 saldo, em_jogo  = info_ec(usuario)
 
-# Inicializa session_state para valores de EC (permite cálculo dinâmico)
+# Inicializa session_state para EC e placares
 for jogo in todos_jogos:
-    jid = jogo["id"]
+    jid          = jogo["id"]
+    exist        = palpites_atuais.get(jid)
+    aposta_atual = float(exist[2]) if exist and exist[2] else 0.0
+    locked       = aposta_atual > 0
+
     if f"aposta_{jid}" not in st.session_state:
-        exist = palpites_atuais.get(jid, (None, None, 0))
-        st.session_state[f"aposta_{jid}"] = int(exist[2]) if exist[2] else 0
+        st.session_state[f"aposta_{jid}"] = int(aposta_atual)
+
+    # Placares: vazio por padrão; apenas jogos travados (com aposta) exibem o valor salvo
+    if f"casa_{jid}" not in st.session_state:
+        st.session_state[f"casa_{jid}"] = int(exist[0]) if locked and exist else None
+    if f"fora_{jid}" not in st.session_state:
+        st.session_state[f"fora_{jid}"] = int(exist[1]) if locked and exist else None
 
 # EC apostado via apostas já salvas no DB (travadas)
 ec_ja_apostado = sum(
