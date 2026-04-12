@@ -82,8 +82,12 @@ with tab_resultados:
                     data_fmt = j["data"]
 
                 gc, gf = j["gols_casa"], j["gols_fora"]
-                col_data, col_jogo = st.columns([1, 5])
+                col_data, col_lc, col_jogo, col_lf = st.columns([1, 0.3, 5, 0.3])
                 col_data.caption(data_fmt)
+                if j.get("logo_casa"):
+                    col_lc.image(j["logo_casa"], width=24)
+                if j.get("logo_fora"):
+                    col_lf.image(j["logo_fora"], width=24)
                 if gc > gf:
                     col_jogo.markdown(f"**{j['casa']}** {gc} x {gf} {j['fora']}")
                 elif gf > gc:
