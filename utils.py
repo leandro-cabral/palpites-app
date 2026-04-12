@@ -28,11 +28,6 @@ def apply_mobile_css():
             gap: 0.15rem !important;
         }
 
-        /* Esconde logos (colunas decorativas) para liberar espaço */
-        [data-testid="stImage"] {
-            display: none !important;
-        }
-
         /* Inputs numéricos mais compactos */
         [data-testid="stNumberInput"] input {
             padding: 0.15rem 0.2rem !important;

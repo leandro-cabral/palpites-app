@@ -177,15 +177,15 @@ apostas_no_form = {}
 for nome_liga, jogos in ligas.items():
     st.subheader(nome_liga)
 
-    # Cabeçalho das colunas
-    h_lc, h_casa, h_gc, h_x, h_gf, h_fora, h_lf, h_ec = st.columns([0.5, 2.2, 0.9, 0.3, 0.9, 2.2, 0.5, 1.5])
+    # Cabeçalho das colunas (5 colunas: casa, gc, x, gf, fora, ec)
+    h_casa, h_gc, h_x, h_gf, h_fora, h_ec = st.columns([2.7, 0.9, 0.3, 0.9, 2.7, 1.5])
     h_gc.caption("Casa")
     h_gf.caption("Fora")
     h_ec.caption("💰 EC")
 
     for jogo in jogos:
         jid          = jogo["id"]
-        exist        = palpites_atuais.get(jid)          # None se não palpitou
+        exist        = palpites_atuais.get(jid)
         aposta_atual = float(exist[2]) if exist and exist[2] else 0.0
 
         # Trava se já apostou OU se o jogo já começou
@@ -198,9 +198,9 @@ for nome_liga, jogos in ligas.items():
 
         locked = aposta_atual > 0 or iniciou
         if iniciou and aposta_atual == 0:
-            badge = " ⏱️"   # jogo em andamento/encerrado, sem aposta prévia
+            badge = " ⏱️"
         elif locked:
-            badge = " 🔒"   # apostado — travado
+            badge = " 🔒"
         else:
             badge = ""
 
@@ -214,15 +214,20 @@ for nome_liga, jogos in ligas.items():
         else:
             odds_str = "odds indisponíveis"
 
-        # Layout: [logo_casa] [nome_casa] [gc] [x] [gf] [nome_fora] [logo_fora] [ec]
-        col_lc, col_casa, col_gc, col_x, col_gf, col_fora, col_lf, col_ec_in = st.columns([0.5, 2.2, 0.9, 0.3, 0.9, 2.2, 0.5, 1.5])
+        # Logo inline: imagem pequena antes do nome usando HTML
+        def _logo_html(url, lado):
+            if not url:
+                return ""
+            float_dir = "left" if lado == "casa" else "right"
+            margin    = "margin-right:6px" if lado == "casa" else "margin-left:6px"
+            return f'<img src="{url}" width="20" style="vertical-align:middle;{margin};float:{float_dir}">'
 
-        with col_lc:
-            if jogo.get("logo_casa"):
-                st.image(jogo["logo_casa"], width=36)
+        # Layout: [nome_casa+logo] [gc] [x] [gf] [nome_fora+logo] [ec]
+        col_casa, col_gc, col_x, col_gf, col_fora, col_ec_in = st.columns([2.7, 0.9, 0.3, 0.9, 2.7, 1.5])
 
         with col_casa:
-            st.markdown(f"**{jogo['casa']}**{badge}")
+            logo_c = _logo_html(jogo.get("logo_casa"), "casa")
+            st.markdown(f"{logo_c}**{jogo['casa']}**{badge}", unsafe_allow_html=True)
             st.caption(f"{data_fmt} · {odds_str}")
 
         # Valor padrão: existente se já apostou (locked), senão vazio (None)
@@ -247,13 +252,10 @@ for nome_liga, jogos in ligas.items():
             )
 
         with col_fora:
-            st.markdown(f"**{jogo['fora']}**")
+            logo_f = _logo_html(jogo.get("logo_fora"), "fora")
+            st.markdown(f"**{jogo['fora']}**{logo_f}", unsafe_allow_html=True)
             if gc is not None and gf is not None and not locked and is_surrealidade(gc, gf):
                 st.caption("🌪️ Surrealidade!")
-
-        with col_lf:
-            if jogo.get("logo_fora"):
-                st.image(jogo["logo_fora"], width=36)
 
         with col_ec_in:
             # Travado: max = valor já apostado; livre: max = saldo disponível
