@@ -199,6 +199,36 @@ with tab_admin:
                 except Exception as e:
                     st.error(f"Erro na migração: {e}")
 
+    with st.expander("Resetar senha de usuário"):
+        pwd_reset = st.text_input("Senha admin", type="password", key="admin_pwd_reset")
+        col_u, col_s = st.columns(2)
+        usuario_reset = col_u.text_input("Nome do usuário", key="usuario_reset")
+        nova_senha    = col_s.text_input("Nova senha", type="password", key="nova_senha_reset")
+        if st.button("Redefinir senha", key="btn_reset_senha"):
+            if not ADMIN_PWD or pwd_reset != ADMIN_PWD:
+                st.error("Senha admin incorreta.")
+            elif not usuario_reset or not nova_senha:
+                st.warning("Preencha o nome do usuário e a nova senha.")
+            elif len(nova_senha) < 4:
+                st.warning("A nova senha deve ter ao menos 4 caracteres.")
+            else:
+                import hashlib as _hashlib
+                novo_hash = _hashlib.sha256(nova_senha.encode()).hexdigest()
+                conn = get_connection()
+                row = conn.execute(
+                    "SELECT id FROM usuarios WHERE nome = ?", (usuario_reset,)
+                ).fetchone()
+                if not row:
+                    st.error(f"Usuário '{usuario_reset}' não encontrado.")
+                else:
+                    conn.execute(
+                        "UPDATE usuarios SET senha_hash = ? WHERE nome = ?",
+                        (novo_hash, usuario_reset),
+                    )
+                    conn.commit()
+                    st.success(f"Senha de **{usuario_reset}** redefinida com sucesso.")
+                conn.close()
+
     with st.expander("Resetar banco de dados"):
         pwd_input = st.text_input("Senha admin", type="password", key="reset_pwd")
         if st.button("Apagar todos usuários e palpites", type="primary"):
