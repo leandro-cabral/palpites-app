@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 from api import get_resultados, get_resultados_espn
 from database import get_connection, init_db
-from scoring import calcular_pontos, calcular_ec_ganhos, DESCRICAO_PONTOS, fmt_ec
+from scoring import calcular_pontos, calcular_ec_ganhos, is_surrealidade, DESCRICAO_PONTOS, fmt_ec
 from utils import sidebar_login
 
 st.set_page_config(page_title="Resultados", page_icon="📋", layout="wide")
@@ -13,7 +13,7 @@ init_db()
 API_KEY = st.secrets["API_KEY"]
 
 with st.sidebar:
-    st.title("⚽ Palpites")
+    st.title("⚽ Copa Elevação Sabichão")
     st.caption("Sistema de palpites para amigos")
 
 usuario_logado = sidebar_login()
@@ -126,8 +126,10 @@ with tab_processar:
                 ).fetchall()
 
                 for p in palpites:
-                    pts = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc, gf)
-                    ec  = calcular_ec_ganhos(pts, p["moeda_apostada"], p["odd_apostada"])
+                    pts    = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc, gf)
+                    surreal = is_surrealidade(p["palpite_casa"], p["palpite_fora"])
+                    ec     = calcular_ec_ganhos(pts, p["moeda_apostada"], p["odd_apostada"],
+                                               surrealidade=(surreal and pts is not None and pts > 0))
                     conn.execute(
                         "UPDATE palpites SET gols_casa_real=?, gols_fora_real=?, pontos=?, moedas_ganhas=? WHERE id=?",
                         (gc, gf, pts, ec, p["id"]),
@@ -181,8 +183,10 @@ with tab_processar:
 
             atualizados = 0
             for p in palpites:
-                pts = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc_m, gf_m)
-                ec  = calcular_ec_ganhos(pts, p["moeda_apostada"], p["odd_apostada"])
+                pts     = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc_m, gf_m)
+                surreal = is_surrealidade(p["palpite_casa"], p["palpite_fora"])
+                ec      = calcular_ec_ganhos(pts, p["moeda_apostada"], p["odd_apostada"],
+                                             surrealidade=(surreal and pts is not None and pts > 0))
                 conn.execute(
                     "UPDATE palpites SET gols_casa_real=?, gols_fora_real=?, pontos=?, moedas_ganhas=? WHERE id=?",
                     (gc_m, gf_m, pts, ec, p["id"]),

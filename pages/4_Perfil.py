@@ -8,7 +8,7 @@ st.set_page_config(page_title="Perfil", page_icon="👤", layout="wide")
 init_db()
 
 with st.sidebar:
-    st.title("⚽ Palpites")
+    st.title("⚽ Copa Elevação Sabichão")
     st.caption("Sistema de palpites para amigos")
 
 usuario = sidebar_login()

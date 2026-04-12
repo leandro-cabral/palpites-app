@@ -12,7 +12,7 @@ init_db()
 API_KEY = st.secrets["API_KEY"]
 
 with st.sidebar:
-    st.title("⚽ Palpites")
+    st.title("⚽ Copa Elevação Sabichão")
     st.caption("Sistema de palpites para amigos")
 
 sidebar_login()

@@ -6,9 +6,9 @@ from api import (
 )
 from database import get_connection, init_db
 from utils import sidebar_login
-from scoring import fmt_ec
+from scoring import fmt_ec, is_surrealidade
 
-st.set_page_config(page_title="Palpites", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Copa Elevação Sabichão", page_icon="⚽", layout="wide")
 
 API_KEY      = st.secrets["API_KEY"]
 ODDS_API_KEY = st.secrets.get("ODDS_API_KEY", None)
@@ -63,12 +63,12 @@ def _fmt_odd(v):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("⚽ Palpites")
+    st.title("⚽ Copa Elevação Sabichão")
     st.caption("Sistema de palpites para amigos")
 
 usuario = sidebar_login()
 
-st.title("⚽ Fazer Palpites")
+st.title("⚽ Copa Elevação Sabichão")
 
 if not usuario:
     st.info("Faça login na barra lateral para registrar seus palpites.")
@@ -247,6 +247,8 @@ for nome_liga, jogos in ligas.items():
 
         with col_fora:
             st.markdown(f"**{jogo['fora']}**")
+            if gc is not None and gf is not None and not locked and is_surrealidade(gc, gf):
+                st.caption("🌪️ Surrealidade!")
 
         with col_lf:
             if jogo.get("logo_fora"):

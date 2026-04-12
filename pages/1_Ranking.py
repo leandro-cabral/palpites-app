@@ -4,17 +4,17 @@ from database import get_connection, init_db
 from utils import sidebar_login, get_avatar
 from scoring import DESCRICAO_PONTOS, calcular_score_ranking, ordenar_ranking
 
-st.set_page_config(page_title="Ranking", page_icon="🏆", layout="wide")
+st.set_page_config(page_title="Ranking Lisan Al Gaib", page_icon="🏆", layout="wide")
 
 init_db()
 
 with st.sidebar:
-    st.title("⚽ Palpites")
+    st.title("⚽ Copa Elevação Sabichão")
     st.caption("Sistema de palpites para amigos")
 
 usuario_logado = sidebar_login()
 
-st.title("🏆 Ranking")
+st.title("🏆 Ranking Lisan Al Gaib")
 
 conn = get_connection()
 
@@ -30,10 +30,10 @@ rows = conn.execute("""
         COUNT(*) AS total_palpites,
         SUM(CASE WHEN p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS jogos_avaliados,
         COALESCE(SUM(p.pontos), 0) AS total_pontos,
-        SUM(CASE WHEN p.pontos = 3 THEN 1 ELSE 0 END) AS placares_exatos,
-        SUM(CASE WHEN p.pontos = 2 THEN 1 ELSE 0 END) AS empates_certos,
-        SUM(CASE WHEN p.pontos = 1 THEN 1 ELSE 0 END) AS resultados_certos,
-        SUM(CASE WHEN p.pontos = 0 THEN 1 ELSE 0 END) AS erros,
+        SUM(CASE WHEN p.pontos IN (4.5, 9.0) THEN 1 ELSE 0 END) AS placares_exatos,
+        SUM(CASE WHEN p.pontos IN (3.0, 6.0) THEN 1 ELSE 0 END) AS empates_certos,
+        SUM(CASE WHEN p.pontos = 1.5 THEN 1 ELSE 0 END) AS resultados_certos,
+        SUM(CASE WHEN p.pontos < 0 THEN 1 ELSE 0 END) AS erros,
         SUM(CASE WHEN p.moeda_apostada > 0 AND p.pontos IS NOT NULL THEN 1 ELSE 0 END) AS apostas_resolvidas,
         COALESCE(SUM(p.moedas_ganhas), 0) AS ec_ganhos_total
     FROM palpites p
