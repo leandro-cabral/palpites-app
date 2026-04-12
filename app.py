@@ -5,10 +5,11 @@ from api import (
     calcular_odds_por_pontos, _mesclar_odds, _odd_apostada,
 )
 from database import get_connection, init_db
-from utils import sidebar_login
+from utils import sidebar_login, apply_mobile_css
 from scoring import fmt_ec, is_surrealidade
 
 st.set_page_config(page_title="Copa Elevação Sabichão", page_icon="⚽", layout="wide")
+apply_mobile_css()
 
 API_KEY      = st.secrets["API_KEY"]
 ODDS_API_KEY = st.secrets.get("ODDS_API_KEY", None)

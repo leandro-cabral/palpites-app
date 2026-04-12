@@ -4,11 +4,12 @@ from datetime import datetime
 from api import get_resultados, get_resultados_espn
 from database import get_connection, init_db
 from scoring import calcular_pontos, calcular_ec_ganhos, is_surrealidade, DESCRICAO_PONTOS, fmt_ec
-from utils import sidebar_login
+from utils import sidebar_login, apply_mobile_css
 
 st.set_page_config(page_title="Resultados", page_icon="📋", layout="wide")
 
 init_db()
+apply_mobile_css()
 
 API_KEY = st.secrets["API_KEY"]
 

@@ -1,11 +1,12 @@
 import streamlit as st
 from database import get_connection, init_db
 from scoring import fmt_ec
-from utils import sidebar_login, get_avatar, AVATARES, _info_ec
+from utils import sidebar_login, get_avatar, AVATARES, _info_ec, apply_mobile_css
 
 st.set_page_config(page_title="Perfil", page_icon="👤", layout="wide")
 
 init_db()
+apply_mobile_css()
 
 with st.sidebar:
     st.title("⚽ Copa Elevação Sabichão")

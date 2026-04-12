@@ -3,11 +3,12 @@ import pandas as pd
 from datetime import datetime
 from api import get_standings, get_resultados, get_standings_espn, get_resultados_espn, get_logos_espn, LIGAS
 from database import init_db
-from utils import sidebar_login
+from utils import sidebar_login, apply_mobile_css
 
 st.set_page_config(page_title="Ligas", page_icon="📊", layout="wide")
 
 init_db()
+apply_mobile_css()
 
 API_KEY = st.secrets["API_KEY"]
 

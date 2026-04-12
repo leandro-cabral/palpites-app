@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 from database import get_connection, init_db
-from utils import sidebar_login, get_avatar
+from utils import sidebar_login, get_avatar, apply_mobile_css
 from scoring import DESCRICAO_PONTOS, calcular_score_ranking, ordenar_ranking
 
 st.set_page_config(page_title="Ranking Lisan Al Gaib", page_icon="🏆", layout="wide")
 
 init_db()
+apply_mobile_css()
 
 with st.sidebar:
     st.title("⚽ Copa Elevação Sabichão")

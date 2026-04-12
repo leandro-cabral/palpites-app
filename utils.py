@@ -2,6 +2,77 @@ import hashlib
 import streamlit as st
 from database import get_connection
 
+
+def apply_mobile_css():
+    """Injeta CSS responsivo para melhorar a experiência no mobile."""
+    st.markdown("""
+    <style>
+    /* ── Reduz padding do container principal ───────────────────────────── */
+    .block-container {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: 1.5rem !important;
+        max-width: 100% !important;
+    }
+
+    @media (max-width: 640px) {
+        /* Padding ainda menor em telas pequenas */
+        .block-container {
+            padding-left: 0.4rem !important;
+            padding-right: 0.4rem !important;
+            padding-top: 0.75rem !important;
+        }
+
+        /* Reduz o espaço entre colunas */
+        [data-testid="stHorizontalBlock"] {
+            gap: 0.15rem !important;
+        }
+
+        /* Esconde logos (colunas decorativas) para liberar espaço */
+        [data-testid="stImage"] {
+            display: none !important;
+        }
+
+        /* Inputs numéricos mais compactos */
+        [data-testid="stNumberInput"] input {
+            padding: 0.15rem 0.2rem !important;
+            font-size: 0.85rem !important;
+        }
+        [data-testid="stNumberInput"] button {
+            width: 1.4rem !important;
+            min-width: 1.4rem !important;
+        }
+
+        /* Texto em colunas de time menor */
+        [data-testid="stMarkdownContainer"] p {
+            font-size: 0.82rem !important;
+            line-height: 1.3 !important;
+        }
+
+        /* Captions menores */
+        [data-testid="stCaptionContainer"] p {
+            font-size: 0.68rem !important;
+        }
+
+        /* Métricas mais compactas */
+        [data-testid="metric-container"] {
+            padding: 0.4rem 0.5rem !important;
+        }
+
+        /* Oculta colunas de escudo na tabela de ligas */
+        .liga-escudo {
+            display: none !important;
+        }
+
+        /* Botão salvar não precisa de tanto espaço */
+        [data-testid="stButton"] button {
+            font-size: 0.9rem !important;
+            padding: 0.4rem !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 AVATARES = [
     "⚽", "🏆", "👑", "🔥", "⚡", "🎯", "💎", "🌟",
     "🦁", "🐯", "🦊", "🐺", "🦅", "🦈", "🐊", "🦝",
