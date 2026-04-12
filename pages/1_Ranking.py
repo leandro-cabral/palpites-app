@@ -28,7 +28,7 @@ conn = get_connection()
 rows = conn.execute("""
     SELECT
         p.usuario,
-        COALESCE(u.saldo_ec, 10) AS saldo_ec,
+        COALESCE(MAX(u.saldo_ec), 10) AS saldo_ec,
         COALESCE((
             SELECT SUM(moeda_apostada) FROM palpites
             WHERE usuario = p.usuario AND moeda_apostada > 0 AND pontos IS NULL
