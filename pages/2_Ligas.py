@@ -53,23 +53,26 @@ with tab_class:
     if erro:
         st.error(f"Erro ao carregar classificação: {erro}")
     elif tabela:
-        df = pd.DataFrame(tabela).set_index("Pos")
+        # Cabeçalho
+        h0, h1, h2, h3, h4, h5, h6, h7, h8, h9 = st.columns([0.4, 0.4, 2.5, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.8])
+        for col, label in zip([h0,h1,h2,h3,h4,h5,h6,h7,h8,h9],
+                               ["","Pos","Time","Pts","J","V","E","D","GP","SG"]):
+            col.caption(label)
+        st.divider()
 
-        # Garante coluna Escudo mesmo se ausente
-        if "Escudo" not in df.columns:
-            df.insert(0, "Escudo", "")
-
-        # Reordena: Escudo primeiro, depois Time, depois stats
-        cols_stats = [c for c in df.columns if c not in ("Escudo", "Time")]
-        df = df[["Escudo", "Time"] + cols_stats]
-
-        st.dataframe(
-            df,
-            use_container_width=True,
-            column_config={
-                "Escudo": st.column_config.ImageColumn("", width="small"),
-            },
-        )
+        for row in tabela:
+            c0, c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns([0.4, 0.4, 2.5, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.8])
+            if row.get("Escudo"):
+                c0.image(row["Escudo"], width=24)
+            c1.write(row["Pos"])
+            c2.markdown(f"**{row['Time']}**")
+            c3.markdown(f"**{row['Pts']}**")
+            c4.write(row["J"])
+            c5.write(row["V"])
+            c6.write(row["E"])
+            c7.write(row["D"])
+            c8.write(row.get("GP", ""))
+            c9.write(row.get("SG", ""))
     else:
         st.info("Nenhum dado de classificação disponível.")
 
