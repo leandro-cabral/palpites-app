@@ -540,6 +540,7 @@ def _db_buscar_ranking():
                COALESCE(SUM(CASE WHEN p.pontos IS NULL THEN p.moeda_apostada ELSE 0 END), 0) AS ec_em_jogo
         FROM palpites p
         JOIN usuarios u ON p.usuario = u.nome
+        WHERE p.moeda_apostada > 0
         GROUP BY p.usuario, u.saldo_ec
         ORDER BY (COALESCE(SUM(p.pontos), 0) * u.saldo_ec) DESC,
                  COALESCE(SUM(p.pontos), 0) DESC,
