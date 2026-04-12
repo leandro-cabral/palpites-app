@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from api import (
     get_jogos, get_jogos_espn, get_odds, get_standings_espn,
     calcular_odds_por_pontos, _mesclar_odds, _odd_apostada,
@@ -221,7 +221,8 @@ for nome_liga, jogos in ligas.items():
         # Trava se já apostou OU se o jogo já começou
         try:
             dt         = datetime.fromisoformat(jogo["data"].replace("Z", "+00:00"))
-            data_fmt   = dt.strftime("%d/%m %H:%M")
+            brt        = dt.astimezone(timezone(timedelta(hours=-3)))
+            data_fmt   = brt.strftime("%d/%m %H:%M") + " BRT"
             iniciou    = datetime.now(timezone.utc) >= dt
         except Exception:
             dt, data_fmt, iniciou = None, jogo["data"], False

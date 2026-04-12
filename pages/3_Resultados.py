@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from api import get_resultados, get_resultados_espn
 from database import get_connection, init_db
 from scoring import calcular_pontos, calcular_ec_ganhos, is_surrealidade, DESCRICAO_PONTOS, fmt_ec
@@ -57,7 +57,7 @@ with tab_resultados:
             for j in sorted(jogos_liga, key=lambda x: x["data"], reverse=True):
                 try:
                     dt = datetime.fromisoformat(j["data"].replace("Z", "+00:00"))
-                    data_fmt = dt.strftime("%d/%m %H:%M")
+                    data_fmt = dt.astimezone(timezone(timedelta(hours=-3))).strftime("%d/%m %H:%M") + " BRT"
                 except Exception:
                     data_fmt = j["data"]
 
