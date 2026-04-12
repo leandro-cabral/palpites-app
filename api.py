@@ -410,6 +410,31 @@ def get_resultados_espn(days_back=7):
     return jogos
 
 
+def get_liga_logos():
+    """
+    Retorna dict {nome_liga: url_logo} para todas as ligas.
+    Football-data.org CDN para as 5 ligas europeias;
+    ESPN para o Brasileirão (obtido da resposta do endpoint de times).
+    """
+    logos = {
+        "Premier League":   "https://crests.football-data.org/PL.png",
+        "La Liga":          "https://crests.football-data.org/PD.png",
+        "Serie A":          "https://crests.football-data.org/SA.png",
+        "Bundesliga":       "https://crests.football-data.org/BL1.png",
+        "Champions League": "https://crests.football-data.org/CL.png",
+    }
+    try:
+        r = requests.get(f"{ESPN_BASE}/bra.1/teams", timeout=10)
+        if r.ok:
+            league      = r.json().get("sports", [{}])[0].get("leagues", [{}])[0]
+            liga_logos  = league.get("logos", [])
+            if liga_logos:
+                logos["Brasileirão"] = liga_logos[0]["href"]
+    except Exception:
+        pass
+    return logos
+
+
 def get_logos_espn():
     """Retorna dict {shortDisplayName: logo_url} para times do Brasileirão."""
     try:

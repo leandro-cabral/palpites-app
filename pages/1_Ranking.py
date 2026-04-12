@@ -3,11 +3,16 @@ import pandas as pd
 from database import get_connection, init_db
 from utils import sidebar_login, get_avatar, apply_mobile_css
 from scoring import DESCRICAO_PONTOS, calcular_score_ranking, ordenar_ranking
+from api import get_liga_logos
 
 st.set_page_config(page_title="Ranking Lisan Al Gaib", page_icon="🏆", layout="wide")
 
 init_db()
 apply_mobile_css()
+
+@st.cache_data(ttl=86400)
+def _logos_ligas():
+    return get_liga_logos()
 
 with st.sidebar:
     st.title("⚽ Copa Elevação Sabichão")
@@ -106,30 +111,45 @@ palpites = conn.execute("""
 """, (jogador_sel,)).fetchall()
 
 if palpites:
-    rows_detail = []
-    for p in palpites:
-        resultado_real = (
-            f"{p['gols_casa_real']}x{p['gols_fora_real']}"
-            if p["gols_casa_real"] is not None else "—"
-        )
-        odd_txt = f"{p['odd_apostada']:.2f}" if p["odd_apostada"] else "—"
-        ec_txt  = (
-            f"{p['moedas_ganhas']:+.2f}" if p["moedas_ganhas"] is not None
-            else f"{p['moeda_apostada']:.2f} em jogo"
-        )
-        rows_detail.append({
-            "Jogo":        p["jogo"],
-            "Liga":        p["liga"] or "—",
-            "Palpite":     f"{p['palpite_casa']}x{p['palpite_fora']}",
-            "Resultado":   resultado_real,
-            "Pts":         p["pontos"] if p["pontos"] is not None else "—",
-            "Status":      DESCRICAO_PONTOS.get(p["pontos"], "Aguardando") if p["pontos"] is not None else "Aguardando",
-            "EC apostado": f"{p['moeda_apostada']:.2f}",
-            "Odd":         odd_txt,
-            "EC resultado": ec_txt,
-        })
+    logos_ligas = _logos_ligas()
 
-    st.dataframe(pd.DataFrame(rows_detail), use_container_width=True, hide_index=True)
+    # Agrupa palpites por liga
+    por_liga = {}
+    for p in palpites:
+        liga = p["liga"] or "—"
+        por_liga.setdefault(liga, []).append(p)
+
+    for liga_nome, ps in por_liga.items():
+        # Cabeçalho da liga com logo
+        col_logo, col_nome = st.columns([0.3, 5])
+        logo_url = logos_ligas.get(liga_nome, "")
+        if logo_url:
+            col_logo.image(logo_url, width=32)
+        col_nome.markdown(f"**{liga_nome}**")
+
+        rows_detail = []
+        for p in ps:
+            resultado_real = (
+                f"{p['gols_casa_real']}x{p['gols_fora_real']}"
+                if p["gols_casa_real"] is not None else "—"
+            )
+            odd_txt = f"{p['odd_apostada']:.2f}" if p["odd_apostada"] else "—"
+            ec_txt  = (
+                f"{p['moedas_ganhas']:+.2f}" if p["moedas_ganhas"] is not None
+                else f"{p['moeda_apostada']:.2f} em jogo"
+            )
+            rows_detail.append({
+                "Jogo":        p["jogo"],
+                "Palpite":     f"{p['palpite_casa']}x{p['palpite_fora']}",
+                "Resultado":   resultado_real,
+                "Pts":         p["pontos"] if p["pontos"] is not None else "—",
+                "Status":      DESCRICAO_PONTOS.get(p["pontos"], "Aguardando") if p["pontos"] is not None else "Aguardando",
+                "EC apostado": f"{p['moeda_apostada']:.2f}",
+                "Odd":         odd_txt,
+                "EC resultado": ec_txt,
+            })
+
+        st.dataframe(pd.DataFrame(rows_detail), use_container_width=True, hide_index=True)
 else:
     st.info("Nenhum palpite com EC encontrado.")
 

@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from api import get_standings, get_resultados, get_standings_espn, get_resultados_espn, get_logos_espn, LIGAS
+from api import get_standings, get_resultados, get_standings_espn, get_resultados_espn, get_logos_espn, get_liga_logos, LIGAS
 from database import init_db
 from utils import sidebar_login, apply_mobile_css
 
@@ -29,6 +29,10 @@ def _standings_br():
 def _logos_br():
     return get_logos_espn()
 
+@st.cache_data(ttl=86400)
+def _logos_ligas():
+    return get_liga_logos()
+
 @st.cache_data(ttl=1800, show_spinner="Carregando classificação...")
 def _standings(key, code):
     return get_standings(key, code)
@@ -42,8 +46,15 @@ def _resultados(key):
     return get_resultados(key, days_back=14)
 
 
-todas_ligas = ["Brasileirão"] + list(LIGAS.keys())
-liga_sel = st.selectbox("Selecionar liga", todas_ligas)
+todas_ligas  = ["Brasileirão"] + list(LIGAS.keys())
+logos_ligas  = _logos_ligas()
+
+col_sel, col_logo = st.columns([4, 1])
+liga_sel = col_sel.selectbox("Selecionar liga", todas_ligas)
+logo_liga = logos_ligas.get(liga_sel, "")
+if logo_liga:
+    col_logo.image(logo_liga, width=48)
+
 is_brasileirao = liga_sel == "Brasileirão"
 
 tab_class, tab_resultados = st.tabs(["Classificação", "Resultados Recentes"])
