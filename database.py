@@ -111,20 +111,31 @@ def init_db():
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS jogos (
-        id               TEXT PRIMARY KEY,
-        liga             TEXT NOT NULL,
-        data             TIMESTAMPTZ,
-        casa             TEXT NOT NULL,
-        fora             TEXT NOT NULL,
-        logo_casa        TEXT,
-        logo_fora        TEXT,
-        gols_casa        INTEGER,
-        gols_fora        INTEGER,
-        status           TEXT DEFAULT 'SCHEDULED',
-        lembrete_enviado BOOLEAN DEFAULT FALSE,
-        criado_em        TIMESTAMPTZ DEFAULT NOW()
+        id                   TEXT PRIMARY KEY,
+        liga                 TEXT NOT NULL,
+        data                 TIMESTAMPTZ,
+        casa                 TEXT NOT NULL,
+        fora                 TEXT NOT NULL,
+        logo_casa            TEXT,
+        logo_fora            TEXT,
+        gols_casa            INTEGER,
+        gols_fora            INTEGER,
+        status               TEXT DEFAULT 'SCHEDULED',
+        lembrete_enviado     BOOLEAN DEFAULT FALSE,
+        resultado_notificado BOOLEAN DEFAULT FALSE,
+        criado_em            TIMESTAMPTZ DEFAULT NOW()
     )
     """)
+
+    # Migração para tabelas existentes
+    for col_sql in [
+        "ALTER TABLE jogos ADD COLUMN IF NOT EXISTS lembrete_enviado BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE jogos ADD COLUMN IF NOT EXISTS resultado_notificado BOOLEAN DEFAULT FALSE",
+    ]:
+        try:
+            cur.execute(col_sql)
+        except Exception:
+            pass
 
     conn.commit()
     conn.close()
