@@ -46,7 +46,8 @@ class TestCalcularPontos:
 
     # Empate acertado (placar diferente)
     def test_empate_acertado_placar_diferente(self):
-        assert calcular_pontos(2, 2, 1, 1) == 3.0
+        # 2-2 total=4 >= 4 → surrealidade → 3.0 × 2 = 6.0
+        assert calcular_pontos(2, 2, 1, 1) == 6.0
 
     def test_empate_acertado_outro_placar(self):
         assert calcular_pontos(0, 0, 3, 3) == 3.0
@@ -69,7 +70,8 @@ class TestCalcularPontos:
         assert calcular_pontos(1, 1, 2, 0) == -1.0
 
     def test_errou_vitoria_esperada_empate_real(self):
-        assert calcular_pontos(3, 1, 2, 2) == -1.0
+        # 3-1 total=4 >= 4 → surrealidade → erro = -2.0
+        assert calcular_pontos(3, 1, 2, 2) == -2.0
 
     # Sem resultado real
     def test_sem_resultado_retorna_none(self):
@@ -93,8 +95,8 @@ class TestIsSurrealidade:
     def test_empate_alto_e_surrealidade(self):
         assert is_surrealidade(3, 3) is True  # total=6 > 4
 
-    def test_diferenca_2_total_4_nao_e_surrealidade(self):
-        assert is_surrealidade(3, 1) is False  # dif=2, total=4
+    def test_diferenca_2_total_4_e_surrealidade(self):
+        assert is_surrealidade(3, 1) is True  # dif=2, total=4 >= 4
 
     def test_0x0_nao_e_surrealidade(self):
         assert is_surrealidade(0, 0) is False
@@ -102,11 +104,14 @@ class TestIsSurrealidade:
     def test_1x1_nao_e_surrealidade(self):
         assert is_surrealidade(1, 1) is False
 
-    def test_2x2_nao_e_surrealidade(self):
-        assert is_surrealidade(2, 2) is False  # total=4, não > 4
+    def test_2x2_e_surrealidade(self):
+        assert is_surrealidade(2, 2) is True  # total=4 >= 4
 
     def test_2x0_nao_e_surrealidade(self):
         assert is_surrealidade(2, 0) is False  # dif=2, total=2
+
+    def test_1x3_nao_e_surrealidade_pela_diferenca_mas_sim_pelo_total(self):
+        assert is_surrealidade(1, 3) is True  # total=4 >= 4
 
 
 class TestCalcularPontosSurrealidade:

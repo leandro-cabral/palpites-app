@@ -3,7 +3,7 @@ def is_surrealidade(casa, fora):
     Um placar é 'surrealidade' se a diferença de gols >= 3 OU o total de gols > 4.
     Ex: 3-0, 4-1, 5-2, 3-3, 5-1, 0-3, ...
     """
-    return abs(casa - fora) >= 3 or (casa + fora) > 4
+    return abs(casa - fora) >= 3 or (casa + fora) >= 4
 
 
 def calcular_pontos(palpite_casa, palpite_fora, real_casa, real_fora):
