@@ -109,5 +109,22 @@ def init_db():
     )
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS jogos (
+        id               TEXT PRIMARY KEY,
+        liga             TEXT NOT NULL,
+        data             TIMESTAMPTZ,
+        casa             TEXT NOT NULL,
+        fora             TEXT NOT NULL,
+        logo_casa        TEXT,
+        logo_fora        TEXT,
+        gols_casa        INTEGER,
+        gols_fora        INTEGER,
+        status           TEXT DEFAULT 'SCHEDULED',
+        lembrete_enviado BOOLEAN DEFAULT FALSE,
+        criado_em        TIMESTAMPTZ DEFAULT NOW()
+    )
+    """)
+
     conn.commit()
     conn.close()

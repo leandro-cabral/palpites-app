@@ -110,6 +110,26 @@ if not todos_jogos:
 palpites_atuais = palpites_do_usuario(usuario)
 saldo, em_jogo  = info_ec(usuario)
 
+# Sincroniza jogos carregados no banco
+def _sincronizar_jogos(jogos):
+    conn = get_connection()
+    for j in jogos:
+        try:
+            conn.execute("""
+                INSERT INTO jogos (id, liga, data, casa, fora, logo_casa, logo_fora)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET
+                    logo_casa = excluded.logo_casa,
+                    logo_fora = excluded.logo_fora
+            """, (j["id"], j["liga"], j.get("data"), j["casa"], j["fora"],
+                  j.get("logo_casa", ""), j.get("logo_fora", "")))
+        except Exception:
+            pass
+    conn.commit()
+    conn.close()
+
+_sincronizar_jogos(todos_jogos)
+
 # Inicializa session_state para EC e placares
 for jogo in todos_jogos:
     jid          = jogo["id"]

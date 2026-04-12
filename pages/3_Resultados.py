@@ -126,6 +126,11 @@ with tab_processar:
                         )
                     atualizados += 1
 
+                conn.execute("""
+                    UPDATE jogos SET gols_casa=?, gols_fora=?, status='FINISHED'
+                    WHERE id=?
+                """, (gc, gf, j["id"]))
+
             conn.commit()
             conn.close()
             st.success(f"{atualizados} palpite(s) avaliado(s)!")
