@@ -348,8 +348,10 @@ def _db_registrar_aposta(discord_id, jogo_id, placar_casa, placar_fora, valor):
     label = f"{jogo_row['casa']} x {jogo_row['fora']}"
     c.execute("""
         INSERT INTO palpites (usuario, jogo_id, jogo, liga, palpite_casa, palpite_fora,
-                              moeda_apostada, odds_casa, odds_empate, odds_fora, odd_apostada)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                              moeda_apostada, odds_casa, odds_empate, odds_fora, odd_apostada,
+                              criado_em_brt)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                to_char(NOW() AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI'))
     """, (
         usuario["nome"], jogo_id, label, jogo_row["liga"],
         placar_casa, placar_fora, valor,

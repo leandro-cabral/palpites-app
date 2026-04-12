@@ -344,8 +344,10 @@ if st.button("Salvar palpites", use_container_width=True, type="primary"):
                 conn.execute(
                     """INSERT INTO palpites
                        (usuario, jogo_id, jogo, liga, palpite_casa, palpite_fora,
-                        moeda_apostada, odds_casa, odds_empate, odds_fora, odd_apostada)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                        moeda_apostada, odds_casa, odds_empate, odds_fora, odd_apostada,
+                        criado_em_brt)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,
+                               to_char(NOW() AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI'))
                        ON CONFLICT(usuario, jogo_id) DO UPDATE SET
                            palpite_casa   = excluded.palpite_casa,
                            palpite_fora   = excluded.palpite_fora,
