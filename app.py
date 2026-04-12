@@ -71,11 +71,7 @@ usuario = sidebar_login()
 
 st.title("⚽ Copa Elevação Sabichão")
 
-if not usuario:
-    st.info("Faça login na barra lateral para registrar seus palpites.")
-    st.stop()
-
-# Carrega jogos
+# Carrega jogos (antes do login para sincronizar o banco independente de autenticação)
 jogos_api, erros  = carregar_jogos_api()
 jogos_brasileirao = carregar_jogos_brasileirao()
 
@@ -98,19 +94,7 @@ for j in jogos_brasileirao:
 
 todos_jogos = jogos_api + jogos_brasileirao
 
-if erros:
-    with st.expander("Avisos da API"):
-        for e in erros:
-            st.warning(e)
-
-if not todos_jogos:
-    st.warning("Nenhum jogo disponível para palpite nos próximos 7 dias.")
-    st.stop()
-
-palpites_atuais = palpites_do_usuario(usuario)
-saldo, em_jogo  = info_ec(usuario)
-
-# Sincroniza jogos carregados no banco
+# Sincroniza jogos no banco (roda sempre, independente de login)
 def _sincronizar_jogos(jogos):
     conn = get_connection()
     for j in jogos:
@@ -129,6 +113,22 @@ def _sincronizar_jogos(jogos):
     conn.close()
 
 _sincronizar_jogos(todos_jogos)
+
+if not usuario:
+    st.info("Faça login na barra lateral para registrar seus palpites.")
+    st.stop()
+
+if erros:
+    with st.expander("Avisos da API"):
+        for e in erros:
+            st.warning(e)
+
+if not todos_jogos:
+    st.warning("Nenhum jogo disponível para palpite nos próximos 7 dias.")
+    st.stop()
+
+palpites_atuais = palpites_do_usuario(usuario)
+saldo, em_jogo  = info_ec(usuario)
 
 # Inicializa session_state para EC e placares
 for jogo in todos_jogos:
