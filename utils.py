@@ -84,7 +84,7 @@ def _hash(senha):
 def _info_ec(usuario):
     conn = get_connection()
     row = conn.execute(
-        "SELECT COALESCE(saldo_ec, saldo_moedas, 10) as saldo FROM usuarios WHERE nome=?",
+        "SELECT COALESCE(saldo_ec, 10) as saldo FROM usuarios WHERE nome=?",
         (usuario,),
     ).fetchone()
     em_jogo = conn.execute(

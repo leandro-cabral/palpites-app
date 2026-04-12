@@ -49,7 +49,7 @@ def palpites_do_usuario(usuario):
 
 def info_ec(usuario):
     conn = get_connection()
-    row     = conn.execute("SELECT COALESCE(saldo_ec, saldo_moedas, 10) as saldo FROM usuarios WHERE nome=?", (usuario,)).fetchone()
+    row     = conn.execute("SELECT COALESCE(saldo_ec, 10) as saldo FROM usuarios WHERE nome=?", (usuario,)).fetchone()
     em_jogo = conn.execute(
         "SELECT COALESCE(SUM(moeda_apostada), 0) as c FROM palpites WHERE usuario=? AND moeda_apostada > 0 AND pontos IS NULL",
         (usuario,),
@@ -79,21 +79,6 @@ if not usuario:
 jogos_api, erros  = carregar_jogos_api()
 jogos_brasileirao = carregar_jogos_brasileirao()
 
-conn_tmp = get_connection()
-jogos_manuais_raw = conn_tmp.execute(
-    "SELECT id, liga, data, casa, fora FROM jogos_manuais WHERE status='SCHEDULED' ORDER BY data"
-).fetchall()
-conn_tmp.close()
-
-jogos_manuais = [{
-    "id": f"manual_{r['id']}", "liga": r["liga"], "data": r["data"],
-    "casa": r["casa"], "fora": r["fora"],
-    "logo_casa": "", "logo_fora": "",
-    "label": f"[{r['liga']}] {r['casa']} x {r['fora']}",
-    "fonte": "manual",
-    "odds_casa": None, "odds_empate": None, "odds_fora": None,
-} for r in jogos_manuais_raw]
-
 # Mescla odds
 odds_map = carregar_odds(ODDS_API_KEY)
 for j in jogos_api:
@@ -111,7 +96,7 @@ for j in jogos_brasileirao:
     )
     j["odds_casa"], j["odds_empate"], j["odds_fora"] = oc, oe, of_
 
-todos_jogos = jogos_api + jogos_brasileirao + jogos_manuais
+todos_jogos = jogos_api + jogos_brasileirao
 
 if erros:
     with st.expander("Avisos da API"):

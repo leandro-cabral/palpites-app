@@ -43,26 +43,6 @@ with tab_resultados:
             for e in erros:
                 st.warning(e)
 
-    # Resultados manuais finalizados
-    conn = get_connection()
-    manuais_fin = conn.execute(
-        "SELECT id, liga, data, casa, fora, gols_casa, gols_fora FROM jogos_manuais WHERE status = 'FINISHED' ORDER BY data DESC"
-    ).fetchall()
-    conn.close()
-
-    for r in manuais_fin:
-        jogos.append({
-            "id": f"manual_{r['id']}",
-            "liga": r["liga"],
-            "data": r["data"],
-            "casa": r["casa"],
-            "fora": r["fora"],
-            "gols_casa": r["gols_casa"],
-            "gols_fora": r["gols_fora"],
-            "label": f"[{r['liga']}] {r['casa']} {r['gols_casa']}x{r['gols_fora']} {r['fora']}",
-            "fonte": "manual",
-        })
-
     if not jogos:
         st.info("Nenhum resultado disponível nos últimos 7 dias.")
     else:
@@ -150,68 +130,75 @@ with tab_processar:
             conn.close()
             st.success(f"{atualizados} palpite(s) avaliado(s)!")
 
-    st.divider()
-    st.subheader("Processar jogos manuais")
-    st.caption("Informe o resultado de um jogo manual para calcular os palpites.")
-
-    conn = get_connection()
-    manuais_pend = conn.execute(
-        "SELECT id, liga, casa, fora FROM jogos_manuais WHERE status = 'SCHEDULED'"
-    ).fetchall()
-    conn.close()
-
-    if not manuais_pend:
-        st.info("Nenhum jogo manual pendente de resultado.")
-    else:
-        opcoes = {f"[{r['liga']}] {r['casa']} x {r['fora']}": r["id"] for r in manuais_pend}
-        jogo_sel = st.selectbox("Jogo manual", list(opcoes.keys()))
-        jogo_id = opcoes[jogo_sel]
-
-        col1, col2 = st.columns(2)
-        gc_m = col1.number_input("Gols casa", min_value=0, max_value=20, key="gc_manual")
-        gf_m = col2.number_input("Gols fora", min_value=0, max_value=20, key="gf_manual")
-
-        if st.button("Salvar resultado e calcular pontos"):
-            conn = get_connection()
-            conn.execute(
-                "UPDATE jogos_manuais SET gols_casa=?, gols_fora=?, status='FINISHED' WHERE id=?",
-                (gc_m, gf_m, jogo_id),
-            )
-
-            jid_str = f"manual_{jogo_id}"
-            palpites = conn.execute(
-                """SELECT id, usuario, palpite_casa, palpite_fora,
-                          COALESCE(moeda_apostada, 0) as moeda_apostada, odd_apostada
-                   FROM palpites WHERE jogo_id=? AND pontos IS NULL""",
-                (jid_str,),
-            ).fetchall()
-
-            atualizados = 0
-            for p in palpites:
-                pts     = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc_m, gf_m)
-                surreal = is_surrealidade(p["palpite_casa"], p["palpite_fora"])
-                ec      = calcular_ec_ganhos(pts, p["moeda_apostada"], p["odd_apostada"],
-                                             surrealidade=(surreal and pts is not None and pts > 0))
-                conn.execute(
-                    "UPDATE palpites SET gols_casa_real=?, gols_fora_real=?, pontos=?, moedas_ganhas=? WHERE id=?",
-                    (gc_m, gf_m, pts, ec, p["id"]),
-                )
-                if ec != 0:
-                    conn.execute(
-                        "UPDATE usuarios SET saldo_ec = saldo_ec + ? WHERE nome=?",
-                        (ec, p["usuario"]),
-                    )
-                atualizados += 1
-
-            conn.commit()
-            conn.close()
-            st.success(f"Resultado salvo! {atualizados} palpite(s) avaliado(s).")
-            st.rerun()
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 with tab_admin:
     st.subheader("⚠️ Zona de perigo")
     ADMIN_PWD = st.secrets.get("ADMIN_PASSWORD", "")
+
+    with st.expander("Migrar dados do SQLite local para Supabase"):
+        st.caption("Execute uma única vez para transferir dados da instância local antes do redeploy.")
+        if st.button("Executar migração SQLite → Supabase", key="btn_migrar"):
+            import sqlite3 as _sqlite3
+            import os as _os
+
+            old_db = _os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)), "..", "data", "palpites.db"
+            )
+            if not _os.path.exists(old_db):
+                st.warning("Arquivo SQLite local não encontrado. Nada a migrar.")
+            else:
+                try:
+                    old = _sqlite3.connect(old_db)
+                    old.row_factory = _sqlite3.Row
+                    usuarios_old = old.execute("SELECT * FROM usuarios").fetchall()
+                    palpites_old = old.execute("SELECT * FROM palpites").fetchall()
+                    old.close()
+
+                    new = get_connection()
+                    u_ok = p_ok = 0
+
+                    for u in usuarios_old:
+                        try:
+                            new.execute(
+                                """INSERT INTO usuarios (nome, saldo_ec, avatar_style, senha_hash)
+                                   VALUES (?, ?, ?, ?)
+                                   ON CONFLICT (nome) DO NOTHING""",
+                                (u["nome"], u["saldo_ec"] or 10.0,
+                                 u["avatar_style"] or "⚽", u["senha_hash"]),
+                            )
+                            u_ok += 1
+                        except Exception:
+                            pass
+
+                    for p in palpites_old:
+                        try:
+                            new.execute(
+                                """INSERT INTO palpites
+                                   (usuario, jogo_id, jogo, liga,
+                                    palpite_casa, palpite_fora,
+                                    gols_casa_real, gols_fora_real, pontos,
+                                    moeda_apostada, moedas_ganhas,
+                                    odds_casa, odds_empate, odds_fora, odd_apostada)
+                                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                   ON CONFLICT (usuario, jogo_id) DO NOTHING""",
+                                (p["usuario"], p["jogo_id"], p["jogo"], p["liga"],
+                                 p["palpite_casa"], p["palpite_fora"],
+                                 p["gols_casa_real"], p["gols_fora_real"], p["pontos"],
+                                 p["moeda_apostada"] or 0, p["moedas_ganhas"],
+                                 p.get("odds_casa"), p.get("odds_empate"),
+                                 p.get("odds_fora"), p.get("odd_apostada")),
+                            )
+                            p_ok += 1
+                        except Exception:
+                            pass
+
+                    new.commit()
+                    new.close()
+                    st.success(f"Migração concluída! {u_ok} usuário(s) e {p_ok} palpite(s) transferidos.")
+                except Exception as e:
+                    st.error(f"Erro na migração: {e}")
+
     with st.expander("Resetar banco de dados"):
         pwd_input = st.text_input("Senha admin", type="password", key="reset_pwd")
         if st.button("Apagar todos usuários e palpites", type="primary"):
