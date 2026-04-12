@@ -422,6 +422,7 @@ def get_liga_logos():
         "Serie A":          "https://crests.football-data.org/SA.png",
         "Bundesliga":       "https://crests.football-data.org/BL1.png",
         "Champions League": "https://crests.football-data.org/CL.png",
+        "Brasileirão":      "https://a.espncdn.com/i/leaguelogos/soccer/500/bra.1.png",
     }
     try:
         r = requests.get(f"{ESPN_BASE}/bra.1/teams", timeout=10)

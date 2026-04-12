@@ -138,8 +138,9 @@ if palpites:
                 f"{p['moedas_ganhas']:+.2f}" if p["moedas_ganhas"] is not None
                 else f"{p['moeda_apostada']:.2f} em jogo"
             )
+            jogo_label = p["jogo"].split("] ", 1)[-1] if "]" in p["jogo"] else p["jogo"]
             rows_detail.append({
-                "Jogo":        p["jogo"],
+                "Jogo":        jogo_label,
                 "Palpite":     f"{p['palpite_casa']}x{p['palpite_fora']}",
                 "Resultado":   resultado_real,
                 "Pts":         p["pontos"] if p["pontos"] is not None else "—",
