@@ -10,3 +10,6 @@ __pycache__/
 # Banco de dados local
 data/
 *.db
+
+# Documentação interna
+CLAUDE.md
