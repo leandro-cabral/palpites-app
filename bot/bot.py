@@ -797,14 +797,15 @@ async def checar_resultados():
                               (float(p["moeda_apostada"]) + ec, p["usuario"]))
 
             c.execute("""
-                INSERT INTO jogos (id, liga, casa, fora, data, logo_casa, logo_fora, gols_casa, gols_fora, status, resultado_notificado)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'FINISHED', TRUE)
+                INSERT INTO jogos (id, liga, casa, fora, data, data_brt, logo_casa, logo_fora, gols_casa, gols_fora, status, resultado_notificado)
+                VALUES (%s, %s, %s, %s, %s, to_char(%s::timestamptz AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI'), %s, %s, %s, %s, 'FINISHED', TRUE)
                 ON CONFLICT (id) DO UPDATE
                   SET gols_casa = EXCLUDED.gols_casa,
                       gols_fora = EXCLUDED.gols_fora,
                       status    = 'FINISHED',
-                      resultado_notificado = TRUE
-            """, (j["id"], j["liga"], j["casa"], j["fora"], j["data"],
+                      resultado_notificado = TRUE,
+                      data_brt  = EXCLUDED.data_brt
+            """, (j["id"], j["liga"], j["casa"], j["fora"], j["data"], j["data"],
                   j.get("logo_casa", ""), j.get("logo_fora", ""), gc, gf))
 
             notificados.append((j, palpites, gc, gf))
