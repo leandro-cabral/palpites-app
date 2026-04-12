@@ -43,6 +43,31 @@ def fmt_ec(valor):
     return f"{valor:+.2f} EC" if valor != 0 else "0 EC"
 
 
+def calcular_score_ranking(total_pontos, saldo_ec, ec_em_jogo):
+    """
+    Score do ranking = Pontos × Banca disponível.
+    Banca disponível = saldo_ec − ec_em_jogo (nunca negativa).
+    """
+    banca = max(float(saldo_ec) - float(ec_em_jogo), 0)
+    return round(total_pontos * banca, 2)
+
+
+def ordenar_ranking(jogadores):
+    """
+    Ordena lista de dicts de jogadores pelo critério do ranking:
+      1. Score (pontos × banca) — maior primeiro
+      2. Desempate: total_pontos — maior primeiro
+      3. Desempate: placares_exatos — maior primeiro
+    Cada dict deve ter: score, total_pontos, placares_exatos.
+    Retorna nova lista ordenada.
+    """
+    return sorted(
+        jogadores,
+        key=lambda x: (x["score"], x["total_pontos"], x["placares_exatos"]),
+        reverse=True,
+    )
+
+
 def calcular_ec_ganhos(pontos, valor_apostado, odd_apostada=None):
     """
     Retorna o delta de Elevação Coins ao processar um resultado.

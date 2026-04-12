@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from database import get_connection, init_db
 from utils import sidebar_login, get_avatar
-from scoring import DESCRICAO_PONTOS
+from scoring import DESCRICAO_PONTOS, calcular_score_ranking, ordenar_ranking
 
 st.set_page_config(page_title="Ranking", page_icon="🏆", layout="wide")
 
@@ -46,14 +46,14 @@ if not rows:
     conn.close()
     st.stop()
 
-# Calcula score e ordena em Python (saldo_disponivel não é trivial em SQL puro)
+# Calcula score e ordena
 dados = []
 for r in rows:
     saldo_disp = max(float(r["saldo_ec"]) - float(r["ec_em_jogo"]), 0)
-    score      = round(r["total_pontos"] * saldo_disp, 2)
+    score      = calcular_score_ranking(r["total_pontos"], r["saldo_ec"], r["ec_em_jogo"])
     dados.append({**dict(r), "saldo_disponivel": saldo_disp, "score": score})
 
-dados.sort(key=lambda x: (x["score"], x["total_pontos"], x["placares_exatos"]), reverse=True)
+dados = ordenar_ranking(dados)
 
 # Tabela de ranking
 df = pd.DataFrame(dados)
