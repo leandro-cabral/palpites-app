@@ -743,23 +743,37 @@ async def checar_lembretes():
 
 # ── Task 2: Busca resultados, processa e notifica ─────────────────────────────
 
-_fd_check_counter = 0
+LIGAS_BRASILEIRAO = {"Brasileirão"}
+
+def _tem_jogos_europeus_pendentes():
+    """Retorna True se há jogos europeus SCHEDULED que já deveriam ter terminado."""
+    agora = datetime.now(timezone.utc)
+    conn  = get_conn()
+    c     = cur(conn)
+    c.execute("""
+        SELECT COUNT(*) AS n FROM jogos
+        WHERE status = 'SCHEDULED'
+          AND liga NOT IN %s
+          AND data < %s
+    """, (tuple(LIGAS_BRASILEIRAO), agora - timedelta(minutes=90)))
+    n = c.fetchone()["n"]
+    conn.close()
+    return n > 0
 
 @tasks.loop(minutes=5)
 async def checar_resultados():
-    global _fd_check_counter
     channel = client.get_channel(CHANNEL_ID)
     if not channel:
         return
 
     try:
-        # ESPN: toda execução (a cada 5 min)
-        # football-data.org: a cada 6 execuções (30 min) — evita estourar rate limit do plano free
-        _fd_check_counter += 1
+        # ESPN: toda execução (Brasileirão)
+        # football-data.org: só quando há jogos europeus que já deveriam ter terminado
         espn_jogos = await asyncio.to_thread(get_resultados_espn, 2)
-        fd_jogos   = await asyncio.to_thread(get_resultados_fd, 2) if _fd_check_counter >= 6 else []
-        if _fd_check_counter >= 6:
-            _fd_check_counter = 0
+        tem_europeus = await asyncio.to_thread(_tem_jogos_europeus_pendentes)
+        fd_jogos = await asyncio.to_thread(get_resultados_fd, 2) if tem_europeus else []
+        if tem_europeus:
+            print("[resultados] Jogos europeus pendentes — consultando football-data.org")
 
         jogos_finais = espn_jogos + fd_jogos
 
