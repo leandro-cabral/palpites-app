@@ -95,24 +95,49 @@ for j in jogos_brasileirao:
 todos_jogos = jogos_api + jogos_brasileirao
 
 # Sincroniza jogos no banco (roda sempre, independente de login)
+# Salva odds da API apenas se o banco ainda não tiver (bot é a fonte principal, app é fallback)
 def _sincronizar_jogos(jogos):
     conn = get_connection()
     for j in jogos:
         try:
             conn.execute("""
-                INSERT INTO jogos (id, liga, data, casa, fora, logo_casa, logo_fora)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO jogos (id, liga, data, casa, fora, logo_casa, logo_fora,
+                                   odds_casa, odds_empate, odds_fora)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (id) DO UPDATE SET
-                    logo_casa = excluded.logo_casa,
-                    logo_fora = excluded.logo_fora
+                    logo_casa   = excluded.logo_casa,
+                    logo_fora   = excluded.logo_fora,
+                    odds_casa   = COALESCE(jogos.odds_casa,   excluded.odds_casa),
+                    odds_empate = COALESCE(jogos.odds_empate, excluded.odds_empate),
+                    odds_fora   = COALESCE(jogos.odds_fora,   excluded.odds_fora)
             """, (j["id"], j["liga"], j.get("data"), j["casa"], j["fora"],
-                  j.get("logo_casa", ""), j.get("logo_fora", "")))
+                  j.get("logo_casa", ""), j.get("logo_fora", ""),
+                  j.get("odds_casa"), j.get("odds_empate"), j.get("odds_fora")))
         except Exception:
             pass
     conn.commit()
     conn.close()
 
 _sincronizar_jogos(todos_jogos)
+
+# Após sync, sobrescreve odds em memória com valores do banco (fonte única de verdade)
+def _carregar_odds_do_banco(jogo_ids):
+    if not jogo_ids:
+        return {}
+    conn = get_connection()
+    placeholders = ",".join("?" * len(jogo_ids))
+    rows = conn.execute(
+        f"SELECT id, odds_casa, odds_empate, odds_fora FROM jogos WHERE id IN ({placeholders})",
+        jogo_ids,
+    ).fetchall()
+    conn.close()
+    return {r["id"]: (r["odds_casa"], r["odds_empate"], r["odds_fora"]) for r in rows}
+
+_odds_banco = _carregar_odds_do_banco([j["id"] for j in todos_jogos])
+for j in todos_jogos:
+    db_odds = _odds_banco.get(j["id"])
+    if db_odds and db_odds[0] is not None:
+        j["odds_casa"], j["odds_empate"], j["odds_fora"] = db_odds
 
 if not usuario:
     st.info("Faça login na barra lateral para registrar seus palpites.")
