@@ -664,7 +664,38 @@ async def cmd_apostar(
     await _enviar_resultado_aposta(interaction, result, placar_casa, placar_fora, valor)
 
 
-# ── Task 1: Lembrete 2h antes do jogo ────────────────────────────────────────
+# ── Task 1: Lembretes antes do jogo (2h e 1h) ────────────────────────────────
+
+async def _enviar_lembrete(channel, jogo, faltam_horas: int, conn, c):
+    c.execute("""
+        SELECT nome FROM usuarios
+        WHERE nome NOT IN (
+            SELECT usuario FROM palpites WHERE jogo_id = %s
+        )
+    """, (jogo["id"],))
+    sem_palpite = [r["nome"] for r in c.fetchall()]
+
+    horario = jogo["data"].astimezone(timezone(timedelta(hours=-3))).strftime("%H:%M")
+
+    embed = discord.Embed(
+        title=f"⏰ {jogo['casa']} x {jogo['fora']}",
+        description=f"**{jogo['liga']}** — começa às {horario} (BRT)\nFaltam ~{faltam_horas} hora{'s' if faltam_horas > 1 else ''}!",
+        color=0xff4500 if faltam_horas == 2 else 0xff0000,
+    )
+    if sem_palpite:
+        embed.add_field(
+            name="Ainda não apostaram",
+            value=", ".join(f"**{n}**" for n in sem_palpite),
+            inline=False,
+        )
+    else:
+        embed.add_field(name="✅ Todos apostaram!", value="Boa sorte a todos.", inline=False)
+
+    await channel.send(embed=embed)
+
+    col = "lembrete_enviado" if faltam_horas == 2 else "lembrete_1h_enviado"
+    c.execute(f"UPDATE jogos SET {col} = TRUE WHERE id = %s", (jogo["id"],))
+
 
 @tasks.loop(minutes=15)
 async def checar_lembretes():
@@ -673,50 +704,32 @@ async def checar_lembretes():
         return
 
     agora = datetime.now(timezone.utc)
-    em_2h = agora + timedelta(hours=2)
-    em_3h = agora + timedelta(hours=3)
 
     try:
         conn = get_conn()
         c    = cur(conn)
 
+        # Lembrete de 2h
         c.execute("""
             SELECT id, liga, casa, fora, data
             FROM jogos
             WHERE status = 'SCHEDULED'
               AND lembrete_enviado = FALSE
-              AND data > %s
-              AND data <= %s
-        """, (em_2h, em_3h))
-        jogos = c.fetchall()
+              AND data > %s AND data <= %s
+        """, (agora + timedelta(hours=2), agora + timedelta(hours=3)))
+        for jogo in c.fetchall():
+            await _enviar_lembrete(channel, jogo, 2, conn, c)
 
-        for jogo in jogos:
-            c.execute("""
-                SELECT nome FROM usuarios
-                WHERE nome NOT IN (
-                    SELECT usuario FROM palpites WHERE jogo_id = %s
-                )
-            """, (jogo["id"],))
-            sem_palpite = [r["nome"] for r in c.fetchall()]
-
-            horario = jogo["data"].astimezone(timezone(timedelta(hours=-3))).strftime("%H:%M")
-
-            embed = discord.Embed(
-                title=f"⏰ {jogo['casa']} x {jogo['fora']}",
-                description=f"**{jogo['liga']}** — começa às {horario} (BRT)\nFaltam ~2 horas!",
-                color=0xff4500,
-            )
-            if sem_palpite:
-                embed.add_field(
-                    name="Ainda não apostaram",
-                    value=", ".join(f"**{n}**" for n in sem_palpite),
-                    inline=False,
-                )
-            else:
-                embed.add_field(name="✅ Todos apostaram!", value="Boa sorte a todos.", inline=False)
-
-            await channel.send(embed=embed)
-            c.execute("UPDATE jogos SET lembrete_enviado = TRUE WHERE id = %s", (jogo["id"],))
+        # Lembrete de 1h
+        c.execute("""
+            SELECT id, liga, casa, fora, data
+            FROM jogos
+            WHERE status = 'SCHEDULED'
+              AND lembrete_1h_enviado = FALSE
+              AND data > %s AND data <= %s
+        """, (agora + timedelta(hours=1), agora + timedelta(hours=2)))
+        for jogo in c.fetchall():
+            await _enviar_lembrete(channel, jogo, 1, conn, c)
 
         conn.commit()
         conn.close()
