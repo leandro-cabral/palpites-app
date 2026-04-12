@@ -119,10 +119,10 @@ with tab_processar:
                         "UPDATE palpites SET gols_casa_real=?, gols_fora_real=?, pontos=?, moedas_ganhas=? WHERE id=?",
                         (gc, gf, pts, ec, p["id"]),
                     )
-                    if ec != 0:
+                    if ec > 0:
                         conn.execute(
                             "UPDATE usuarios SET saldo_ec = saldo_ec + ? WHERE nome=?",
-                            (ec, p["usuario"]),
+                            (float(p["moeda_apostada"]) + ec, p["usuario"]),
                         )
                     atualizados += 1
 

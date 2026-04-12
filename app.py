@@ -140,7 +140,7 @@ ec_no_form = sum(
     if palpites_atuais.get(j["id"], (0, 0, 0))[2] == 0
 )
 
-ec_disponivel = saldo - ec_ja_apostado - ec_no_form
+ec_disponivel = saldo - ec_no_form
 
 ligas = {}
 for jogo in todos_jogos:
@@ -244,7 +244,7 @@ for nome_liga, jogos in ligas.items():
 
         with col_ec_in:
             # Travado: max = valor já apostado; livre: max = saldo disponível
-            max_aposta = int(aposta_atual) if locked else int(max(saldo - ec_ja_apostado, 0))
+            max_aposta = int(aposta_atual) if locked else int(max(saldo, 0))
             aposta = st.number_input(
                 "💰 EC", min_value=0, max_value=max_aposta,
                 value=int(aposta_atual), step=1, key=f"aposta_{jid}",
@@ -289,8 +289,8 @@ if st.button("Salvar palpites", use_container_width=True, type="primary"):
 
     if avisos and not para_salvar:
         pass  # nada a salvar, avisos já mostrados
-    elif novos_ec_total > (saldo - ec_ja_apostado):
-        st.error(f"EC insuficiente! Disponível: {saldo - ec_ja_apostado:.2f} EC · Apostando: {novos_ec_total:.2f} EC")
+    elif novos_ec_total > saldo:
+        st.error(f"EC insuficiente! Disponível: {saldo:.2f} EC · Apostando: {novos_ec_total:.2f} EC")
     else:
         for jid, jogo, gc, gf, aposta in para_salvar:
             odd = _odd_apostada(gc, gf, jogo.get("odds_casa"), jogo.get("odds_empate"), jogo.get("odds_fora"))
@@ -312,6 +312,10 @@ if st.button("Salvar palpites", use_container_width=True, type="primary"):
                     (usuario, jid, jogo["label"], jogo["liga"], gc, gf,
                      aposta, jogo.get("odds_casa"), jogo.get("odds_empate"),
                      jogo.get("odds_fora"), odd),
+                )
+                conn.execute(
+                    "UPDATE usuarios SET saldo_ec = saldo_ec - ? WHERE nome = ?",
+                    (aposta, usuario),
                 )
                 salvos += 1
             except Exception as e:

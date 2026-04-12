@@ -121,7 +121,7 @@ def sidebar_login():
 
             saldo, em_jogo = _info_ec(usuario)
             col1, col2 = st.columns(2)
-            col1.metric("💰 Disponível", f"{max(saldo - em_jogo, 0):.2f}")
+            col1.metric("💰 Disponível", f"{max(saldo, 0):.2f}")
             col2.metric("Em jogo", f"{em_jogo:.2f}")
 
             if st.button("Sair", use_container_width=True):

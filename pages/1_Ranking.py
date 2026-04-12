@@ -56,8 +56,8 @@ if not rows:
 # Calcula score e ordena
 dados = []
 for r in rows:
-    saldo_disp = max(float(r["saldo_ec"]) - float(r["ec_em_jogo"]), 0)
-    score      = calcular_score_ranking(r["total_pontos"], r["saldo_ec"], r["ec_em_jogo"])
+    saldo_disp = max(float(r["saldo_ec"]), 0)
+    score      = calcular_score_ranking(r["total_pontos"], r["saldo_ec"], 0)
     dados.append({**dict(r), "saldo_disponivel": saldo_disp, "score": score})
 
 dados = ordenar_ranking(dados)

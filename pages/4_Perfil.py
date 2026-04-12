@@ -21,7 +21,7 @@ if not usuario:
     st.stop()
 
 saldo_total, em_jogo = _info_ec(usuario)
-saldo  = max(saldo_total - em_jogo, 0)  # disponível = total − em jogo
+saldo  = max(saldo_total, 0)
 avatar = get_avatar(usuario)
 
 # ── Avatar atual ──────────────────────────────────────────────────────────────
