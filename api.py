@@ -410,6 +410,31 @@ def get_resultados_espn(days_back=7):
     return jogos
 
 
+def get_logos_espn():
+    """Retorna dict {shortDisplayName: logo_url} para times do Brasileirão."""
+    try:
+        r = requests.get(
+            f"{ESPN_BASE}/bra.1/teams", timeout=10
+        )
+        if not r.ok:
+            return {}
+        times = (
+            r.json()
+            .get("sports", [{}])[0]
+            .get("leagues", [{}])[0]
+            .get("teams", [])
+        )
+        resultado = {}
+        for t in times:
+            team = t["team"]
+            logos = team.get("logos", [])
+            if logos:
+                resultado[team["shortDisplayName"]] = logos[0]["href"]
+        return resultado
+    except requests.exceptions.RequestException:
+        return {}
+
+
 def get_standings_espn():
     """Retorna (tabela, erro) com a classificação do Brasileirão via ESPN."""
     try:

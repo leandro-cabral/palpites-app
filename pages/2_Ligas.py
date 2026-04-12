@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from api import get_standings, get_resultados, get_standings_espn, get_resultados_espn, LIGAS
+from api import get_standings, get_resultados, get_standings_espn, get_resultados_espn, get_logos_espn, LIGAS
 from database import init_db
 from utils import sidebar_login
 
@@ -23,6 +23,10 @@ st.title("📊 Ligas")
 @st.cache_data(ttl=1800, show_spinner="Carregando classificação...")
 def _standings_br():
     return get_standings_espn()
+
+@st.cache_data(ttl=86400)
+def _logos_br():
+    return get_logos_espn()
 
 @st.cache_data(ttl=1800, show_spinner="Carregando classificação...")
 def _standings(key, code):
@@ -53,18 +57,22 @@ with tab_class:
     if erro:
         st.error(f"Erro ao carregar classificação: {erro}")
     elif tabela:
+        # Logos do Brasileirão via endpoint de times (standings não tem logo)
+        logos_br = _logos_br() if is_brasileirao else {}
+
         # Cabeçalho
         h0, h1, h2, h3, h4, h5, h6, h7, h8, h9 = st.columns([0.4, 0.4, 2.5, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.8])
         for col, label in zip([h0,h1,h2,h3,h4,h5,h6,h7,h8,h9],
-                               ["","Pos","Time","Pts","J","V","E","D","GP","SG"]):
+                               ["Pos","","Time","Pts","J","V","E","D","GP","SG"]):
             col.caption(label)
         st.divider()
 
         for row in tabela:
             c0, c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns([0.4, 0.4, 2.5, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.8])
-            if row.get("Escudo"):
-                c0.image(row["Escudo"], width=24)
-            c1.write(row["Pos"])
+            c0.write(row["Pos"])
+            logo = logos_br.get(row["Time"]) or row.get("Escudo") or ""
+            if logo:
+                c1.image(logo, width=24)
             c2.markdown(f"**{row['Time']}**")
             c3.markdown(f"**{row['Pts']}**")
             c4.write(row["J"])
