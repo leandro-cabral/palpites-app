@@ -669,6 +669,73 @@ async def cmd_apostar(
     await _enviar_resultado_aposta(interaction, result, placar_casa, placar_fora, valor)
 
 
+# ── Slash: /meus_palpites ─────────────────────────────────────────────────────
+
+def _db_buscar_palpites_pendentes(discord_id: str):
+    usuario = get_usuario_por_discord(discord_id)
+    if not usuario:
+        return None, None
+
+    conn = get_conn()
+    c    = cur(conn)
+    c.execute("""
+        SELECT p.jogo, p.liga, p.palpite_casa, p.palpite_fora,
+               p.moeda_apostada, p.odd_apostada, p.criado_em_brt,
+               j.data
+        FROM palpites p
+        LEFT JOIN jogos j ON p.jogo_id = j.id
+        WHERE p.usuario = %s AND p.pontos IS NULL
+        ORDER BY j.data ASC
+    """, (usuario["nome"],))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return usuario["nome"], rows
+
+@tree.command(name="meus_palpites", description="Veja seus palpites em jogos ainda não finalizados")
+async def cmd_meus_palpites(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    nome, palpites = await asyncio.to_thread(_db_buscar_palpites_pendentes, str(interaction.user.id))
+
+    if nome is None:
+        await interaction.followup.send("❌ Conta não vinculada. Use `/vincular` primeiro.", ephemeral=True)
+        return
+
+    if not palpites:
+        await interaction.followup.send("Você não tem palpites pendentes no momento.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title=f"🕐 Palpites Pendentes — {nome}",
+        color=0x6366f1,
+    )
+
+    for p in palpites:
+        surreal     = is_surrealidade(p["palpite_casa"], p["palpite_fora"])
+        surreal_txt = " 🌀" if surreal else ""
+        data_txt    = fmt_brt(p["data"]) + " BRT" if p["data"] else "—"
+
+        if p["moeda_apostada"] and p["moeda_apostada"] > 0 and p["odd_apostada"]:
+            lucro_pot = p["moeda_apostada"] * p["odd_apostada"] - p["moeda_apostada"]
+            ec_txt = f"💰 `{p['moeda_apostada']:.2f} EC` · Odd `{p['odd_apostada']}` → potencial `+{lucro_pot:.2f} EC`"
+        elif p["moeda_apostada"] and p["moeda_apostada"] > 0:
+            ec_txt = f"💰 `{p['moeda_apostada']:.2f} EC` apostados"
+        else:
+            ec_txt = "Sem aposta em EC"
+
+        embed.add_field(
+            name=f"{p['jogo']}{surreal_txt}",
+            value=(
+                f"{p['liga']} · {data_txt}\n"
+                f"Palpite: **{p['palpite_casa']} x {p['palpite_fora']}**\n"
+                f"{ec_txt}"
+            ),
+            inline=False,
+        )
+
+    embed.set_footer(text=f"{len(palpites)} palpite(s) aguardando resultado")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 # ── Task 1: Lembretes antes do jogo (2h e 1h) ────────────────────────────────
 
 async def _enviar_lembrete(channel, jogo, faltam_horas: int, conn, c):
