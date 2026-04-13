@@ -410,12 +410,8 @@ def fmt_brt(dt_utc):
 async def on_ready():
     print(f"Bot online: {client.user}")
     guild = discord.Object(id=GUILD_ID)
-    # Primeiro copia e sincroniza no guild (comandos aparecem instantaneamente)
     tree.copy_global_to(guild=guild)
     await tree.sync(guild=guild)
-    # Depois limpa os comandos globais para remover duplicatas
-    tree.clear_commands(guild=None)
-    await tree.sync()
     print("Slash commands sincronizados.")
     checar_lembretes.start()
     checar_resultados.start()
