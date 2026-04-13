@@ -206,7 +206,7 @@ def _db_atualizar_odds():
 def get_resultados_espn(days_back=2):
     hoje  = datetime.today()
     jogos = []
-    for i in range(1, days_back + 1):
+    for i in range(0, days_back + 1):
         data = (hoje - timedelta(days=i)).strftime("%Y%m%d")
         try:
             r = requests.get(f"{ESPN_BASE}/bra.1/scoreboard", params={"dates": data}, timeout=10)
