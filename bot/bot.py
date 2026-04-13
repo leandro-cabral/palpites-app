@@ -5,7 +5,8 @@ import requests
 import discord
 import psycopg2
 import psycopg2.extras
-from datetime import datetime, timezone, timedelta
+import datetime as dt_mod
+from datetime import datetime, timezone, timedelta, time as dt_time
 from discord.ext import tasks
 from discord import app_commands
 
@@ -419,6 +420,7 @@ async def on_ready():
     checar_lembretes.start()
     checar_resultados.start()
     atualizar_odds.start()
+    recarga_semanal.start()
 
 
 # ── UI: Modal de aposta ───────────────────────────────────────────────────────
@@ -940,6 +942,44 @@ async def atualizar_odds():
         print(f"[odds] {n} jogo(s) atualizados.")
     except Exception as e:
         print(f"[odds] Erro: {e}")
+
+
+# ── Task 4: Recarga semanal de EC todo domingo às 22h BRT (01h UTC segunda) ──
+
+@tasks.loop(time=dt_time(hour=1, minute=0, tzinfo=timezone.utc))
+async def recarga_semanal():
+    # Só executa no domingo BRT (01h UTC segunda = 22h BRT domingo)
+    agora_brt = datetime.now(timezone(timedelta(hours=-3)))
+    if agora_brt.weekday() != 6:  # 6 = domingo
+        return
+
+    channel = client.get_channel(CHANNEL_ID)
+    try:
+        def _creditar():
+            conn = get_conn()
+            c    = cur(conn)
+            c.execute("UPDATE usuarios SET saldo_ec = saldo_ec + 20")
+            c.execute("SELECT nome, saldo_ec FROM usuarios ORDER BY nome")
+            usuarios = c.fetchall()
+            conn.commit()
+            conn.close()
+            return usuarios
+
+        usuarios = await asyncio.to_thread(_creditar)
+        print(f"[recarga] +20 EC creditados para {len(usuarios)} usuário(s).")
+
+        if channel:
+            linhas = [f"💰 **{u['nome']}** → `{u['saldo_ec']:.2f} EC`" for u in usuarios]
+            embed = discord.Embed(
+                title="🏦 Recarga Semanal — +20 EC para todos!",
+                description="\n".join(linhas),
+                color=0x10b981,
+            )
+            embed.set_footer(text="Boa semana de palpites! ⚽")
+            await channel.send(embed=embed)
+
+    except Exception as e:
+        print(f"[recarga] Erro: {e}")
 
 
 client.run(DISCORD_TOKEN)
