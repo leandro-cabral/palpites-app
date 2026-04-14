@@ -293,6 +293,21 @@ def _db_buscar_jogos_proximos():
     conn.close()
     return jogos
 
+def _db_buscar_palpites_do_usuario_nos_jogos(discord_id: str, jogo_ids: list):
+    usuario = get_usuario_por_discord(discord_id)
+    if not usuario or not jogo_ids:
+        return {}
+    conn = get_conn()
+    c    = cur(conn)
+    c.execute("""
+        SELECT jogo_id, palpite_casa, palpite_fora
+        FROM palpites
+        WHERE usuario = %s AND jogo_id = ANY(%s)
+    """, (usuario["nome"], jogo_ids))
+    rows = c.fetchall()
+    conn.close()
+    return {r["jogo_id"]: dict(r) for r in rows}
+
 def _db_buscar_jogos_autocomplete(current: str):
     agora = datetime.now(timezone.utc)
     conn  = get_conn()
@@ -461,9 +476,12 @@ class ApostarModal(discord.ui.Modal):
 # ── UI: View com botões por jogo ──────────────────────────────────────────────
 
 class JogosView(discord.ui.View):
-    def __init__(self, jogos: list):
+    def __init__(self, jogos: list, apostados: set = None):
         super().__init__(timeout=3600)
+        apostados = apostados or set()
         for j in jogos[:25]:
+            if j["id"] in apostados:
+                continue
             label    = f"⚽  {j['casa']} x {j['fora']}"[:80]
             jogo_id  = j["id"]
             jogo_lbl = f"{j['casa']} x {j['fora']}"
@@ -612,20 +630,31 @@ async def cmd_jogos(interaction: discord.Interaction):
         await interaction.followup.send("Nenhum jogo disponível no momento.", ephemeral=True)
         return
 
+    jogo_ids     = [j["id"] for j in jogos]
+    palpites_map = await asyncio.to_thread(
+        _db_buscar_palpites_do_usuario_nos_jogos, str(interaction.user.id), jogo_ids
+    )
+    apostados = set(palpites_map.keys())
+
     embed = discord.Embed(title="⚽ Próximos Jogos", color=0x00d2ff)
     for j in jogos:
         odds_txt = (
             f"🏠 `{j['odds_casa']}` · ✏️ `{j['odds_empate']}` · ✈️ `{j['odds_fora']}`"
             if j["odds_casa"] else "_Odds indisponíveis_"
         )
+        if j["id"] in palpites_map:
+            p        = palpites_map[j["id"]]
+            bet_txt  = f"\n✅ Seu palpite: **{p['palpite_casa']} x {p['palpite_fora']}**"
+        else:
+            bet_txt = ""
         embed.add_field(
             name=f"{fmt_brt(j['data'])} BRT — {j['casa']} x {j['fora']}",
-            value=f"{j['liga']} · {odds_txt}",
+            value=f"{j['liga']} · {odds_txt}{bet_txt}",
             inline=False,
         )
 
     embed.set_footer(text="Clique em um jogo abaixo para apostar")
-    await interaction.edit_original_response(embed=embed, view=JogosView(jogos))
+    await interaction.edit_original_response(embed=embed, view=JogosView(jogos, apostados))
 
 
 # ── Autocomplete de jogos ─────────────────────────────────────────────────────
