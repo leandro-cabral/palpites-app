@@ -330,10 +330,13 @@ def _get_jogos_espn_liga(liga_espn: str, nome_liga: str, dias_a_frente: int = 7)
                 continue
 
             for evento in r.json().get("events", []):
-                comp   = evento["competitions"][0]
-                status = comp["status"]["type"]["name"]
+                comp       = evento["competitions"][0]
+                status_obj = comp["status"]["type"]
+                status     = status_obj.get("name", "")
+                completed  = status_obj.get("completed", False)
 
-                if status != "STATUS_SCHEDULED":
+                # Aceita STATUS_SCHEDULED e STATUS_PRE (Libertadores usa STATUS_PRE)
+                if completed or status not in ("STATUS_SCHEDULED", "STATUS_PRE"):
                     continue
 
                 times = {t["homeAway"]: t for t in comp["competitors"]}

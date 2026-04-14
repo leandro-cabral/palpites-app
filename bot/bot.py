@@ -215,8 +215,11 @@ def _get_resultados_espn_liga(liga_espn: str, nome_liga: str, days_back: int = 2
             if not r.ok:
                 continue
             for evento in r.json().get("events", []):
-                comp   = evento["competitions"][0]
-                if comp["status"]["type"]["name"] not in ("STATUS_FINAL", "STATUS_FULL_TIME"):
+                comp       = evento["competitions"][0]
+                status_obj = comp["status"]["type"]
+                # Usa completed (bool) em vez de checar strings específicas de status
+                # Cobre STATUS_FINAL, STATUS_FULL_TIME, STATUS_FINAL_OT, STATUS_FINAL_PEN etc.
+                if not status_obj.get("completed", False):
                     continue
                 times = {t["homeAway"]: t for t in comp["competitors"]}
                 jogos.append({
