@@ -78,62 +78,7 @@ with tab_resultados:
 
 # ── Processar pontos ─────────────────────────────────────────────────────────
 with tab_processar:
-    st.markdown("""
-    Clique em **Processar** para buscar resultados recentes e calcular os pontos
-    dos palpites que ainda não foram avaliados.
-    """)
-
-    if st.button("Processar resultados da API", type="primary"):
-        with st.spinner("Buscando resultados..."):
-            jogos_fin, erros = get_resultados(API_KEY, days_back=14)
-            jogos_fin += get_resultados_espn(days_back=14)
-
-        if erros:
-            for e in erros:
-                st.warning(e)
-
-        if not jogos_fin:
-            st.info("Nenhum resultado encontrado.")
-        else:
-            conn = get_connection()
-            atualizados = 0
-
-            for j in jogos_fin:
-                gc, gf = j["gols_casa"], j["gols_fora"]
-                if gc is None or gf is None:
-                    continue
-
-                palpites = conn.execute(
-                    """SELECT id, usuario, palpite_casa, palpite_fora,
-                              COALESCE(moeda_apostada, 0) as moeda_apostada, odd_apostada
-                       FROM palpites WHERE jogo_id=? AND pontos IS NULL""",
-                    (j["id"],),
-                ).fetchall()
-
-                for p in palpites:
-                    pts    = calcular_pontos(p["palpite_casa"], p["palpite_fora"], gc, gf)
-                    surreal = is_surrealidade(p["palpite_casa"], p["palpite_fora"])
-                    ec     = calcular_ec_ganhos(pts, p["moeda_apostada"], p["odd_apostada"],
-                                               surrealidade=(surreal and pts is not None and pts > 0))
-                    conn.execute(
-                        "UPDATE palpites SET gols_casa_real=?, gols_fora_real=?, pontos=?, moedas_ganhas=? WHERE id=?",
-                        (gc, gf, pts, ec, p["id"]),
-                    )
-                    if ec > 0:
-                        conn.execute(
-                            "UPDATE usuarios SET saldo_ec = saldo_ec + ? WHERE nome=?",
-                            (float(p["moeda_apostada"]) + ec, p["usuario"]),
-                        )
-                    atualizados += 1
-
-                conn.execute("""
-                    UPDATE jogos SET gols_casa=?, gols_fora=?, status='FINISHED'
-                    WHERE id=?
-                """, (gc, gf, j["id"]))
-
-            conn.commit()
-            conn.close()
-            st.success(f"{atualizados} palpite(s) avaliado(s)!")
+    st.info("O processamento de resultados é feito automaticamente pelo bot a cada 5 minutos.")
 
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
@@ -233,6 +178,90 @@ with tab_admin:
                     conn.commit()
                     st.success(f"Senha de **{usuario_reset}** redefinida com sucesso.")
                 conn.close()
+
+    with st.expander("Corrigir Resultado de Jogo"):
+        st.caption("Use quando a API retornou um placar incorreto e os pontos já foram processados.")
+        pwd_corr = st.text_input("Senha admin", type="password", key="admin_pwd_corr")
+
+        conn_corr = get_connection()
+        jogos_fin = conn_corr.execute(
+            """SELECT id, jogo, liga, gols_casa, gols_fora
+               FROM jogos WHERE status='FINISHED' AND gols_casa IS NOT NULL
+               ORDER BY id DESC LIMIT 50"""
+        ).fetchall()
+        conn_corr.close()
+
+        if not jogos_fin:
+            st.info("Nenhum jogo finalizado encontrado no banco.")
+        else:
+            opcoes = {
+                f"{j['jogo']} ({j['liga']}) — resultado atual: {j['gols_casa']}x{j['gols_fora']}": j["id"]
+                for j in jogos_fin
+            }
+            jogo_selecionado = st.selectbox("Jogo a corrigir", list(opcoes.keys()), key="sel_jogo_corr")
+            jogo_id_corr = opcoes[jogo_selecionado]
+
+            col_gc_corr, col_gf_corr = st.columns(2)
+            novo_gc = col_gc_corr.number_input("Gols Casa (correto)", min_value=0, max_value=20, step=1, key="novo_gc")
+            novo_gf = col_gf_corr.number_input("Gols Fora (correto)", min_value=0, max_value=20, step=1, key="novo_gf")
+
+            if st.button("Corrigir e Reprocessar", type="primary", key="btn_corrigir"):
+                if not ADMIN_PWD or pwd_corr != ADMIN_PWD:
+                    st.error("Senha admin incorreta.")
+                else:
+                    conn2 = get_connection()
+                    # Busca todos os palpites JÁ processados para esse jogo
+                    palpites_proc = conn2.execute(
+                        """SELECT id, usuario, palpite_casa, palpite_fora,
+                                  COALESCE(moeda_apostada, 0) as moeda_apostada,
+                                  odd_apostada, moedas_ganhas
+                           FROM palpites WHERE jogo_id=? AND pontos IS NOT NULL""",
+                        (jogo_id_corr,),
+                    ).fetchall()
+
+                    corrigidos = 0
+                    for p in palpites_proc:
+                        old_ec = float(p["moedas_ganhas"]) if p["moedas_ganhas"] is not None else 0.0
+                        moeda  = float(p["moeda_apostada"])
+
+                        # Desfaz EC do processamento anterior
+                        if old_ec > 0:
+                            # Usuário tinha ganho: retira moeda_apostada + lucro que foi creditado
+                            conn2.execute(
+                                "UPDATE usuarios SET saldo_ec = saldo_ec - ? WHERE nome=?",
+                                (moeda + old_ec, p["usuario"]),
+                            )
+                        # (se old_ec <= 0, a aposta já foi descontada na hora do palpite — nada a desfazer)
+
+                        # Recalcula com placar correto
+                        pts    = calcular_pontos(p["palpite_casa"], p["palpite_fora"], novo_gc, novo_gf)
+                        surreal = is_surrealidade(p["palpite_casa"], p["palpite_fora"])
+                        new_ec = calcular_ec_ganhos(pts, moeda, p["odd_apostada"],
+                                                    surrealidade=(surreal and pts is not None and pts > 0))
+
+                        conn2.execute(
+                            """UPDATE palpites
+                               SET gols_casa_real=?, gols_fora_real=?, pontos=?, moedas_ganhas=?
+                               WHERE id=?""",
+                            (novo_gc, novo_gf, pts, new_ec, p["id"]),
+                        )
+
+                        # Aplica novo EC se ganhou
+                        if new_ec > 0:
+                            conn2.execute(
+                                "UPDATE usuarios SET saldo_ec = saldo_ec + ? WHERE nome=?",
+                                (moeda + new_ec, p["usuario"]),
+                            )
+                        corrigidos += 1
+
+                    # Corrige placar na tabela jogos
+                    conn2.execute(
+                        "UPDATE jogos SET gols_casa=?, gols_fora=? WHERE id=?",
+                        (novo_gc, novo_gf, jogo_id_corr),
+                    )
+                    conn2.commit()
+                    conn2.close()
+                    st.success(f"Resultado corrigido para **{novo_gc}x{novo_gf}** · {corrigidos} palpite(s) reprocessado(s).")
 
     with st.expander("Resetar banco de dados"):
         pwd_input = st.text_input("Senha admin", type="password", key="reset_pwd")
