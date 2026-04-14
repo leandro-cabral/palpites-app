@@ -204,13 +204,14 @@ def _db_atualizar_odds():
     conn.close()
     return atualizados
 
-def get_resultados_espn(days_back=2):
+def _get_resultados_espn_liga(liga_espn: str, nome_liga: str, days_back: int = 2):
+    """Genérico: busca resultados finalizados de qualquer liga ESPN."""
     hoje  = datetime.today()
     jogos = []
     for i in range(0, days_back + 1):
         data = (hoje - timedelta(days=i)).strftime("%Y%m%d")
         try:
-            r = requests.get(f"{ESPN_BASE}/bra.1/scoreboard", params={"dates": data}, timeout=10)
+            r = requests.get(f"{ESPN_BASE}/{liga_espn}/scoreboard", params={"dates": data}, timeout=10)
             if not r.ok:
                 continue
             for evento in r.json().get("events", []):
@@ -220,7 +221,7 @@ def get_resultados_espn(days_back=2):
                 times = {t["homeAway"]: t for t in comp["competitors"]}
                 jogos.append({
                     "id":        f"espn_{evento['id']}",
-                    "liga":      "Brasileirão",
+                    "liga":      nome_liga,
                     "data":      comp["date"],
                     "casa":      times["home"]["team"]["shortDisplayName"],
                     "fora":      times["away"]["team"]["shortDisplayName"],
@@ -232,6 +233,13 @@ def get_resultados_espn(days_back=2):
         except Exception:
             pass
     return jogos
+
+
+def get_resultados_espn(days_back=2):
+    return _get_resultados_espn_liga("bra.1", "Brasileirão", days_back)
+
+def get_resultados_libertadores(days_back=2):
+    return _get_resultados_espn_liga("conmebol.libertadores", "Libertadores", days_back)
 
 def get_resultados_fd(days_back=2):
     hoje      = datetime.today()
@@ -853,7 +861,7 @@ async def checar_lembretes():
 
 # ── Task 2: Busca resultados, processa e notifica ─────────────────────────────
 
-LIGAS_BRASILEIRAO = {"Brasileirão"}
+LIGAS_ESPN = {"Brasileirão", "Libertadores"}
 
 def _tem_jogos_europeus_pendentes():
     """Retorna True se há jogos europeus SCHEDULED que já deveriam ter terminado."""
@@ -865,7 +873,7 @@ def _tem_jogos_europeus_pendentes():
         WHERE status = 'SCHEDULED'
           AND liga NOT IN %s
           AND data < %s
-    """, (tuple(LIGAS_BRASILEIRAO), agora - timedelta(minutes=90)))
+    """, (tuple(LIGAS_ESPN), agora - timedelta(minutes=90)))
     n = c.fetchone()["n"]
     conn.close()
     return n > 0
@@ -877,15 +885,16 @@ async def checar_resultados():
         return
 
     try:
-        # ESPN: toda execução (Brasileirão)
+        # ESPN: toda execução (Brasileirão + Libertadores)
         # football-data.org: só quando há jogos europeus que já deveriam ter terminado
-        espn_jogos = await asyncio.to_thread(get_resultados_espn, 2)
+        espn_jogos   = await asyncio.to_thread(get_resultados_espn, 2)
+        liberta_jogos = await asyncio.to_thread(get_resultados_libertadores, 2)
         tem_europeus = await asyncio.to_thread(_tem_jogos_europeus_pendentes)
-        fd_jogos = await asyncio.to_thread(get_resultados_fd, 2) if tem_europeus else []
+        fd_jogos     = await asyncio.to_thread(get_resultados_fd, 2) if tem_europeus else []
         if tem_europeus:
             print("[resultados] Jogos europeus pendentes — consultando football-data.org")
 
-        jogos_finais = espn_jogos + fd_jogos
+        jogos_finais = espn_jogos + liberta_jogos + fd_jogos
 
         conn = get_conn()
         c    = cur(conn)

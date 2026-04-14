@@ -1,9 +1,17 @@
 import streamlit as st
 from datetime import datetime, timezone, timedelta
 from api import (
-    get_jogos, get_jogos_espn, get_odds, get_standings_espn,
+    get_jogos, get_jogos_espn, get_jogos_libertadores, get_odds, get_standings_espn, get_standings,
     calcular_odds_por_pontos, _mesclar_odds, _odd_apostada,
+    get_h2h_espn, get_h2h_fd, LIGAS as LIGAS_FD_CODES,
+    _normalizar, _similaridade,
 )
+
+# Mapa liga → código ESPN (para H2H via summary endpoint)
+_LIGA_ESPN_CODE = {
+    "Brasileirão":  "bra.1",
+    "Libertadores": "conmebol.libertadores",
+}
 from database import get_connection, init_db
 from utils import sidebar_login, apply_mobile_css
 from scoring import fmt_ec, is_surrealidade
@@ -24,6 +32,10 @@ def carregar_jogos_api():
 def carregar_jogos_brasileirao():
     return get_jogos_espn(dias_a_frente=7)
 
+@st.cache_data(ttl=3600)
+def carregar_jogos_libertadores():
+    return get_jogos_libertadores(dias_a_frente=7)
+
 @st.cache_data(ttl=43200)
 def carregar_odds(key):
     if not key:
@@ -33,6 +45,63 @@ def carregar_odds(key):
 @st.cache_data(ttl=1800)
 def carregar_standings_brasileirao():
     return get_standings_espn()
+
+@st.cache_data(ttl=43200)
+def carregar_standings_europeia(api_key, competition_code):
+    tabela, _ = get_standings(api_key, competition_code)
+    return {r["Time"]: r for r in (tabela or [])}
+
+@st.cache_data(ttl=86400)
+def carregar_h2h_espn_cache(event_id, liga_espn="bra.1"):
+    return get_h2h_espn(event_id, liga_espn)
+
+@st.cache_data(ttl=86400)
+def carregar_h2h_fd_cache(api_key, competition_code, home, away):
+    return get_h2h_fd(api_key, competition_code, home, away)
+
+
+def _buscar_stats_time(all_standings, team_name):
+    if team_name in all_standings:
+        return all_standings[team_name]
+    norm = _normalizar(team_name)
+    best_score, best = 0.0, None
+    for name, stats in all_standings.items():
+        s = _similaridade(norm, _normalizar(name))
+        if s > best_score:
+            best_score, best = s, stats
+    return best if best_score > 0.7 else None
+
+def _render_stats_time(nome, stats):
+    if not stats:
+        st.caption(f"_{nome}: dados indisponíveis_")
+        return
+    j     = max(stats["J"], 1)
+    aprov = round(stats["Pts"] / (j * 3) * 100)
+    sg    = stats["SG"]
+    st.markdown(
+        f"**{nome}**  \n"
+        f"🏅 **{stats['Pos']}º** · {stats['Pts']} pts  \n"
+        f"📈 {aprov}% aproveit. ({j}J · {stats['V']}V {stats['E']}E {stats['D']}D)  \n"
+        f"⚽ {stats['GP']} pró · {stats['GC']} contra  \n"
+        f"📊 Saldo: `{'+' if sg >= 0 else ''}{sg}`"
+    )
+
+def _render_h2h(h2h, home_team_hoje):
+    if not h2h:
+        st.caption("_Sem dados de confronto disponíveis._")
+        return
+    home_norm = _normalizar(home_team_hoje)
+    for m in h2h:
+        gc, gf = m.get("gols_casa"), m.get("gols_fora")
+        if gc is None or gf is None:
+            continue
+        home_foi_casa = _similaridade(_normalizar(m["casa"]), home_norm) > 0.7
+        if home_foi_casa:
+            emoji = "🟢" if gc > gf else ("🔴" if gc < gf else "🟡")
+        else:
+            emoji = "🟢" if gf > gc else ("🔴" if gf < gc else "🟡")
+        data_fmt = m["data"][5:].replace("-", "/") if len(m["data"]) >= 10 else m["data"]
+        st.markdown(f"{emoji} `{data_fmt}` — **{m['casa']} {gc}×{gf} {m['fora']}**")
 
 
 def palpites_do_usuario(usuario):
@@ -74,6 +143,7 @@ st.title("⚽ Copa Elevação Sabichão")
 # Carrega jogos (antes do login para sincronizar o banco independente de autenticação)
 jogos_api, erros  = carregar_jogos_api()
 jogos_brasileirao = carregar_jogos_brasileirao()
+jogos_libertadores = carregar_jogos_libertadores()
 
 # Mescla odds
 odds_map = carregar_odds(ODDS_API_KEY)
@@ -92,7 +162,19 @@ for j in jogos_brasileirao:
     )
     j["odds_casa"], j["odds_empate"], j["odds_fora"] = oc, oe, of_
 
-todos_jogos = jogos_api + jogos_brasileirao
+todos_jogos = jogos_api + jogos_brasileirao + jogos_libertadores
+
+# Carrega standings das ligas europeias com jogos agendados (para stats de equipe)
+standings_europeias = {}
+for _liga in {j["liga"] for j in jogos_api}:
+    _code = LIGAS_FD_CODES.get(_liga)
+    if _code:
+        standings_europeias[_liga] = carregar_standings_europeia(API_KEY, _code)
+
+# Mapa unificado: {nome_time: row_stats} para todas as ligas
+all_standings = {row["Time"]: row for row in (tabela_br or [])}
+for _rows in standings_europeias.values():
+    all_standings.update(_rows)
 
 # Sincroniza jogos no banco (roda sempre, independente de login)
 # Salva odds da API apenas se o banco ainda não tiver (bot é a fonte principal, app é fallback)
@@ -300,6 +382,28 @@ for nome_liga, jogos in ligas.items():
 
         novos_palpites[jid]  = (jogo, gc, gf)
         apostas_no_form[jid] = aposta_atual if locked else aposta
+
+        with st.expander("📊 Estatísticas"):
+            col_h, col_a = st.columns(2)
+            with col_h:
+                _render_stats_time(jogo["casa"], _buscar_stats_time(all_standings, jogo["casa"]))
+            with col_a:
+                _render_stats_time(jogo["fora"], _buscar_stats_time(all_standings, jogo["fora"]))
+
+            st.markdown("**🆚 Confronto Direto**")
+            h2h_key = f"h2h_{jid}"
+            if not st.session_state.get(h2h_key):
+                if st.button("Carregar histórico", key=f"btn_h2h_{jid}"):
+                    st.session_state[h2h_key] = True
+                    st.rerun()
+            if st.session_state.get(h2h_key):
+                liga_espn = _LIGA_ESPN_CODE.get(jogo["liga"])
+                if liga_espn:
+                    h2h = carregar_h2h_espn_cache(jid.replace("espn_", ""), liga_espn)
+                else:
+                    comp_code = LIGAS_FD_CODES.get(jogo["liga"])
+                    h2h = carregar_h2h_fd_cache(API_KEY, comp_code, jogo["casa"], jogo["fora"]) if comp_code else []
+                _render_h2h(h2h, jogo["casa"])
 
     st.divider()
 

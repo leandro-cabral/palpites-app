@@ -311,10 +311,10 @@ def get_standings(api_key, competition_code):
         return None, str(e)
 
 
-# ── ESPN (Brasileirão) ────────────────────────────────────────────────────────
+# ── ESPN (Brasileirão + Libertadores) ────────────────────────────────────────
 
-def get_jogos_espn(dias_a_frente=7):
-    """Retorna jogos agendados do Brasileirão via ESPN."""
+def _get_jogos_espn_liga(liga_espn: str, nome_liga: str, dias_a_frente: int = 7):
+    """Genérico: retorna jogos agendados de qualquer liga ESPN."""
     hoje  = datetime.today()
     jogos = []
 
@@ -322,7 +322,7 @@ def get_jogos_espn(dias_a_frente=7):
         data = (hoje + timedelta(days=i)).strftime("%Y%m%d")
         try:
             r = requests.get(
-                f"{ESPN_BASE}/bra.1/scoreboard",
+                f"{ESPN_BASE}/{liga_espn}/scoreboard",
                 params={"dates": data},
                 timeout=10,
             )
@@ -342,13 +342,13 @@ def get_jogos_espn(dias_a_frente=7):
 
                 jogos.append({
                     "id":          f"espn_{evento['id']}",
-                    "liga":        "Brasileirão",
+                    "liga":        nome_liga,
                     "data":        comp["date"],
                     "casa":        casa,
                     "fora":        fora,
                     "logo_casa":   times["home"]["team"].get("logo", ""),
                     "logo_fora":   times["away"]["team"].get("logo", ""),
-                    "label":       f"[Brasileirão] {casa} x {fora}",
+                    "label":       f"[{nome_liga}] {casa} x {fora}",
                     "fonte":       "espn",
                     "odds_casa":   None,
                     "odds_empate": None,
@@ -359,6 +359,16 @@ def get_jogos_espn(dias_a_frente=7):
             pass
 
     return jogos
+
+
+def get_jogos_espn(dias_a_frente=7):
+    """Retorna jogos agendados do Brasileirão via ESPN."""
+    return _get_jogos_espn_liga("bra.1", "Brasileirão", dias_a_frente)
+
+
+def get_jogos_libertadores(dias_a_frente=7):
+    """Retorna jogos agendados da Copa Libertadores via ESPN."""
+    return _get_jogos_espn_liga("conmebol.libertadores", "Libertadores", dias_a_frente)
 
 
 def get_resultados_espn(days_back=7):
@@ -459,6 +469,95 @@ def get_logos_espn():
         return resultado
     except requests.exceptions.RequestException:
         return {}
+
+
+def get_h2h_espn(event_id: str, liga_espn: str = "bra.1"):
+    """
+    Busca confronto direto via ESPN summary.
+    event_id: ID do evento ESPN sem o prefixo 'espn_'.
+    liga_espn: código ESPN da liga (ex: 'bra.1', 'conmebol.libertadores').
+    Retorna lista de [{data, casa, fora, gols_casa, gols_fora}].
+    """
+    try:
+        r = requests.get(
+            f"{ESPN_BASE}/{liga_espn}/summary",
+            params={"event": event_id},
+            timeout=10,
+        )
+        if not r.ok:
+            return []
+
+        data   = r.json()
+        result = []
+
+        for comp in data.get("header", {}).get("competitions", []):
+            for meeting in comp.get("previousMeetings", []):
+                competitors = meeting.get("competitors", [])
+                home = next((c for c in competitors if c.get("homeAway") == "home"), None)
+                away = next((c for c in competitors if c.get("homeAway") == "away"), None)
+                if not home or not away:
+                    continue
+                result.append({
+                    "data":      meeting.get("date", "")[:10],
+                    "casa":      home.get("team", {}).get("shortDisplayName", "?"),
+                    "fora":      away.get("team", {}).get("shortDisplayName", "?"),
+                    "gols_casa": int(home.get("score", 0) or 0),
+                    "gols_fora": int(away.get("score", 0) or 0),
+                })
+
+        return result[:5]
+
+    except Exception:
+        return []
+
+
+def get_h2h_fd(api_key: str, competition_code: str, home_team: str, away_team: str):
+    """
+    Busca confronto direto via football-data.org (ligas europeias).
+    Escaneia matches FINISHED da temporada atual e filtra pelos dois times.
+    Retorna lista de até 5 encontros [{data, casa, fora, gols_casa, gols_fora}].
+    """
+    if not api_key:
+        return []
+    try:
+        r = requests.get(
+            f"{BASE_URL}/competitions/{competition_code}/matches",
+            headers=_headers_fd(api_key),
+            params={"status": "FINISHED"},
+            timeout=10,
+        )
+        if not r.ok:
+            return []
+
+        home_norm = _normalizar(home_team)
+        away_norm = _normalizar(away_team)
+        h2h       = []
+
+        for match in r.json().get("matches", []):
+            h = _normalizar(_nome_time(match["homeTeam"]))
+            a = _normalizar(_nome_time(match["awayTeam"]))
+
+            e_h2h = (
+                (_similaridade(h, home_norm) > 0.7 and _similaridade(a, away_norm) > 0.7) or
+                (_similaridade(h, away_norm) > 0.7 and _similaridade(a, home_norm) > 0.7)
+            )
+            if not e_h2h:
+                continue
+
+            score = match.get("score", {}).get("fullTime", {})
+            h2h.append({
+                "data":      match["utcDate"][:10],
+                "casa":      _nome_time(match["homeTeam"]),
+                "fora":      _nome_time(match["awayTeam"]),
+                "gols_casa": score.get("home"),
+                "gols_fora": score.get("away"),
+            })
+
+        h2h.sort(key=lambda x: x["data"], reverse=True)
+        return h2h[:5]
+
+    except Exception:
+        return []
 
 
 def get_standings_espn():
