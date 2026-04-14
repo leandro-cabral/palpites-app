@@ -433,6 +433,22 @@ async def on_ready():
     atualizar_odds.start()
     recarga_semanal.start()
 
+    channel = client.get_channel(CHANNEL_ID)
+    if channel:
+        embed = discord.Embed(
+            title="🆕 Novidades no bot!",
+            description=(
+                "**`/meus_palpites`** — novo comando!\n"
+                "Veja todos os seus palpites em jogos que ainda não foram finalizados, "
+                "com placar apostado, EC em jogo e lucro potencial.\n\n"
+                "**`/jogos`** — atualizado!\n"
+                "Jogos que você já apostou não mostram mais o botão de apostar. "
+                "Seu palpite aparece direto no embed com ✅."
+            ),
+            color=0x6366f1,
+        )
+        await channel.send(embed=embed)
+
 
 # ── UI: Modal de aposta ───────────────────────────────────────────────────────
 
