@@ -514,11 +514,10 @@ def get_h2h_espn(event_id: str, liga_espn: str = "bra.1"):
         return []
 
 
-def get_h2h_fd(api_key: str, competition_code: str, home_team: str, away_team: str):
+def get_historico_liga_fd(api_key: str, competition_code: str):
     """
-    Busca confronto direto via football-data.org (ligas europeias).
-    Escaneia matches FINISHED da temporada atual e filtra pelos dois times.
-    Retorna lista de até 5 encontros [{data, casa, fora, gols_casa, gols_fora}].
+    Retorna todos os matches FINISHED da temporada atual de uma competição FD.
+    Use esta função como fonte única — filtre H2H e form client-side.
     """
     if not api_key:
         return []
@@ -529,38 +528,111 @@ def get_h2h_fd(api_key: str, competition_code: str, home_team: str, away_team: s
             params={"status": "FINISHED"},
             timeout=10,
         )
-        if not r.ok:
-            return []
-
-        home_norm = _normalizar(home_team)
-        away_norm = _normalizar(away_team)
-        h2h       = []
-
-        for match in r.json().get("matches", []):
-            h = _normalizar(_nome_time(match["homeTeam"]))
-            a = _normalizar(_nome_time(match["awayTeam"]))
-
-            e_h2h = (
-                (_similaridade(h, home_norm) > 0.7 and _similaridade(a, away_norm) > 0.7) or
-                (_similaridade(h, away_norm) > 0.7 and _similaridade(a, home_norm) > 0.7)
-            )
-            if not e_h2h:
-                continue
-
-            score = match.get("score", {}).get("fullTime", {})
-            h2h.append({
-                "data":      match["utcDate"][:10],
-                "casa":      _nome_time(match["homeTeam"]),
-                "fora":      _nome_time(match["awayTeam"]),
-                "gols_casa": score.get("home"),
-                "gols_fora": score.get("away"),
-            })
-
-        h2h.sort(key=lambda x: x["data"], reverse=True)
-        return h2h[:5]
-
+        return r.json().get("matches", []) if r.ok else []
     except Exception:
         return []
+
+
+def get_h2h_from_matches_fd(matches: list, home_team: str, away_team: str):
+    """Filtra confronto direto entre dois times a partir de uma lista de matches FD."""
+    home_norm = _normalizar(home_team)
+    away_norm = _normalizar(away_team)
+    h2h = []
+    for match in matches:
+        h = _normalizar(_nome_time(match["homeTeam"]))
+        a = _normalizar(_nome_time(match["awayTeam"]))
+        e_h2h = (
+            (_similaridade(h, home_norm) > 0.7 and _similaridade(a, away_norm) > 0.7) or
+            (_similaridade(h, away_norm) > 0.7 and _similaridade(a, home_norm) > 0.7)
+        )
+        if not e_h2h:
+            continue
+        score = match.get("score", {}).get("fullTime", {})
+        h2h.append({
+            "data":      match["utcDate"][:10],
+            "casa":      _nome_time(match["homeTeam"]),
+            "fora":      _nome_time(match["awayTeam"]),
+            "gols_casa": score.get("home"),
+            "gols_fora": score.get("away"),
+        })
+    h2h.sort(key=lambda x: x["data"], reverse=True)
+    return h2h[:5]
+
+
+def get_form_from_matches_fd(matches: list, team_name: str, n: int = 5):
+    """Filtra os últimos N jogos de um time a partir de uma lista de matches FD."""
+    team_norm = _normalizar(team_name)
+    jogos = []
+    for match in matches:
+        h = _normalizar(_nome_time(match["homeTeam"]))
+        a = _normalizar(_nome_time(match["awayTeam"]))
+        foi_casa = _similaridade(h, team_norm) > 0.7
+        foi_fora = _similaridade(a, team_norm) > 0.7
+        if not foi_casa and not foi_fora:
+            continue
+        score = match.get("score", {}).get("fullTime", {})
+        jogos.append({
+            "data":      match["utcDate"][:10],
+            "casa":      _nome_time(match["homeTeam"]),
+            "fora":      _nome_time(match["awayTeam"]),
+            "gols_casa": score.get("home"),
+            "gols_fora": score.get("away"),
+            "foi_casa":  foi_casa,
+        })
+    jogos.sort(key=lambda x: x["data"], reverse=True)
+    return jogos[:n]
+
+
+def get_h2h_fd(api_key: str, competition_code: str, home_team: str, away_team: str):
+    """Busca confronto direto via football-data.org (wrapper para uso externo ao app)."""
+    matches = get_historico_liga_fd(api_key, competition_code)
+    return get_h2h_from_matches_fd(matches, home_team, away_team)
+
+
+def get_form_espn(team_name: str, liga_espn: str, n: int = 5):
+    """
+    Busca os últimos N jogos de um time via ESPN.
+    Consulta os 2 meses anteriores usando o formato YYYYMM.
+    """
+    hoje      = datetime.today()
+    team_norm = _normalizar(team_name)
+    todos     = []
+
+    for meses_atras in range(2):
+        mes        = hoje.replace(day=1) - timedelta(days=30 * meses_atras)
+        data_param = mes.strftime("%Y%m")
+        try:
+            r = requests.get(
+                f"{ESPN_BASE}/{liga_espn}/scoreboard",
+                params={"dates": data_param, "limit": 100},
+                timeout=10,
+            )
+            if not r.ok:
+                continue
+            for evento in r.json().get("events", []):
+                comp = evento["competitions"][0]
+                if not comp["status"]["type"].get("completed", False):
+                    continue
+                times     = {t["homeAway"]: t for t in comp["competitors"]}
+                home_name = times.get("home", {}).get("team", {}).get("shortDisplayName", "")
+                away_name = times.get("away", {}).get("team", {}).get("shortDisplayName", "")
+                foi_casa  = _similaridade(_normalizar(home_name), team_norm) > 0.7
+                foi_fora  = _similaridade(_normalizar(away_name), team_norm) > 0.7
+                if not foi_casa and not foi_fora:
+                    continue
+                todos.append({
+                    "data":      comp["date"][:10],
+                    "casa":      home_name,
+                    "fora":      away_name,
+                    "gols_casa": int(times.get("home", {}).get("score", 0) or 0),
+                    "gols_fora": int(times.get("away", {}).get("score", 0) or 0),
+                    "foi_casa":  foi_casa,
+                })
+        except Exception:
+            pass
+
+    todos.sort(key=lambda x: x["data"], reverse=True)
+    return todos[:n]
 
 
 def get_standings_espn():

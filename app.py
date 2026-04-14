@@ -3,7 +3,8 @@ from datetime import datetime, timezone, timedelta
 from api import (
     get_jogos, get_jogos_espn, get_jogos_libertadores, get_odds, get_standings_espn, get_standings,
     calcular_odds_por_pontos, _mesclar_odds, _odd_apostada,
-    get_h2h_espn, get_h2h_fd, LIGAS as LIGAS_FD_CODES,
+    get_h2h_espn, get_historico_liga_fd, get_h2h_from_matches_fd, get_form_from_matches_fd,
+    get_form_espn, LIGAS as LIGAS_FD_CODES,
     _normalizar, _similaridade,
 )
 
@@ -55,9 +56,13 @@ def carregar_standings_europeia(api_key, competition_code):
 def carregar_h2h_espn_cache(event_id, liga_espn="bra.1"):
     return get_h2h_espn(event_id, liga_espn)
 
-@st.cache_data(ttl=86400)
-def carregar_h2h_fd_cache(api_key, competition_code, home, away):
-    return get_h2h_fd(api_key, competition_code, home, away)
+@st.cache_data(ttl=3600)
+def carregar_historico_fd_cache(api_key, comp_code):
+    return get_historico_liga_fd(api_key, comp_code)
+
+@st.cache_data(ttl=3600)
+def carregar_form_espn_cache(team_name, liga_espn):
+    return get_form_espn(team_name, liga_espn)
 
 
 def _buscar_stats_time(all_standings, team_name):
@@ -85,6 +90,22 @@ def _render_stats_time(nome, stats):
         f"⚽ {stats['GP']} pró · {stats['GC']} contra  \n"
         f"📊 Saldo: `{'+' if sg >= 0 else ''}{sg}`"
     )
+
+def _render_form_time(form):
+    if not form:
+        st.caption("_Histórico indisponível_")
+        return
+    for j in form:
+        gc, gf = j.get("gols_casa"), j.get("gols_fora")
+        if gc is None or gf is None:
+            continue
+        foi_casa = j.get("foi_casa", True)
+        pts_time = gc if foi_casa else gf
+        pts_opp  = gf if foi_casa else gc
+        opp      = j["fora"] if foi_casa else j["casa"]
+        emoji    = "🟢" if pts_time > pts_opp else ("🔴" if pts_time < pts_opp else "🟡")
+        data     = j["data"][5:].replace("-", "/") if len(j["data"]) >= 10 else j["data"]
+        st.markdown(f"{emoji} `{data}` **{pts_time}×{pts_opp}** vs {opp}")
 
 def _render_h2h(h2h, home_team_hoje):
     if not h2h:
@@ -384,11 +405,29 @@ for nome_liga, jogos in ligas.items():
         apostas_no_form[jid] = aposta_atual if locked else aposta
 
         with st.expander("📊 Estatísticas"):
+            liga_espn = _LIGA_ESPN_CODE.get(jogo["liga"])
+            comp_code = LIGAS_FD_CODES.get(jogo["liga"])
+
+            # Carrega form (últimos 5 jogos) por fonte
+            if liga_espn:
+                form_casa = carregar_form_espn_cache(jogo["casa"], liga_espn)
+                form_fora = carregar_form_espn_cache(jogo["fora"], liga_espn)
+            elif comp_code:
+                _hist = carregar_historico_fd_cache(API_KEY, comp_code)
+                form_casa = get_form_from_matches_fd(_hist, jogo["casa"])
+                form_fora = get_form_from_matches_fd(_hist, jogo["fora"])
+            else:
+                form_casa = form_fora = []
+
             col_h, col_a = st.columns(2)
             with col_h:
                 _render_stats_time(jogo["casa"], _buscar_stats_time(all_standings, jogo["casa"]))
+                st.markdown("**📅 Últimos 5 jogos**")
+                _render_form_time(form_casa)
             with col_a:
                 _render_stats_time(jogo["fora"], _buscar_stats_time(all_standings, jogo["fora"]))
+                st.markdown("**📅 Últimos 5 jogos**")
+                _render_form_time(form_fora)
 
             st.markdown("**🆚 Confronto Direto**")
             h2h_key = f"h2h_{jid}"
@@ -397,12 +436,10 @@ for nome_liga, jogos in ligas.items():
                     st.session_state[h2h_key] = True
                     st.rerun()
             if st.session_state.get(h2h_key):
-                liga_espn = _LIGA_ESPN_CODE.get(jogo["liga"])
                 if liga_espn:
                     h2h = carregar_h2h_espn_cache(jid.replace("espn_", ""), liga_espn)
                 else:
-                    comp_code = LIGAS_FD_CODES.get(jogo["liga"])
-                    h2h = carregar_h2h_fd_cache(API_KEY, comp_code, jogo["casa"], jogo["fora"]) if comp_code else []
+                    h2h = get_h2h_from_matches_fd(_hist, jogo["casa"], jogo["fora"]) if comp_code else []
                 _render_h2h(h2h, jogo["casa"])
 
     st.divider()
