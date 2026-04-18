@@ -225,13 +225,13 @@ with tab_admin:
                         moeda  = float(p["moeda_apostada"])
 
                         # Desfaz EC do processamento anterior
-                        if old_ec > 0:
-                            # Usuário tinha ganho: retira moeda_apostada + lucro que foi creditado
+                        if old_ec >= 0:
+                            # Usuário tinha ganho (ou empatou com odd 1.0): retira moeda_apostada + lucro que foi creditado
                             conn2.execute(
                                 "UPDATE usuarios SET saldo_ec = saldo_ec - ? WHERE nome=?",
                                 (moeda + old_ec, p["usuario"]),
                             )
-                        # (se old_ec <= 0, a aposta já foi descontada na hora do palpite — nada a desfazer)
+                        # (se old_ec < 0, a aposta já foi descontada na hora do palpite — nada a desfazer)
 
                         # Recalcula com placar correto
                         pts    = calcular_pontos(p["palpite_casa"], p["palpite_fora"], novo_gc, novo_gf)
@@ -246,8 +246,8 @@ with tab_admin:
                             (novo_gc, novo_gf, pts, new_ec, p["id"]),
                         )
 
-                        # Aplica novo EC se ganhou
-                        if new_ec > 0:
+                        # Aplica novo EC se ganhou (>0) ou devolveu stake com odd 1.0 (==0)
+                        if new_ec >= 0:
                             conn2.execute(
                                 "UPDATE usuarios SET saldo_ec = saldo_ec + ? WHERE nome=?",
                                 (moeda + new_ec, p["usuario"]),

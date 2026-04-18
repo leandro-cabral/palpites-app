@@ -916,7 +916,7 @@ async def checar_resultados():
                     "UPDATE palpites SET gols_casa_real=%s, gols_fora_real=%s, pontos=%s, moedas_ganhas=%s WHERE id=%s",
                     (gc, gf, pts, ec, p["id"]),
                 )
-                if ec > 0:
+                if ec >= 0:
                     c.execute("UPDATE usuarios SET saldo_ec = saldo_ec + %s WHERE nome = %s",
                               (float(p["moeda_apostada"]) + ec, p["usuario"]))
 
@@ -964,7 +964,7 @@ async def checar_resultados():
                     "UPDATE palpites SET gols_casa_real=%s, gols_fora_real=%s, pontos=%s, moedas_ganhas=%s WHERE id=%s",
                     (gc, gf, pts, ec, p["id"]),
                 )
-                if ec > 0:
+                if ec >= 0:
                     c.execute("UPDATE usuarios SET saldo_ec = saldo_ec + %s WHERE nome = %s",
                               (float(p["moeda_apostada"]) + ec, p["usuario"]))
 
