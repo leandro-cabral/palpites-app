@@ -82,6 +82,14 @@ LIGAS_ODDS = {
     "Champions League": "soccer_uefa_champs_league",
 }
 
+LIGAS_ESPN_EU = {
+    "Premier League":   "eng.1",
+    "La Liga":          "esp.1",
+    "Serie A":          "ita.1",
+    "Bundesliga":       "ger.1",
+    "Champions League": "uefa.champions",
+}
+
 def _nome_time(team):
     return team.get("shortName") or team.get("name", "?")
 
@@ -866,6 +874,90 @@ def _tem_jogos_europeus_pendentes():
     conn.close()
     return n > 0
 
+def _days_back_europeus():
+    """Calcula janela de busca baseada no jogo europeu pendente mais antigo."""
+    agora = datetime.now(timezone.utc)
+    conn  = get_conn()
+    c     = cur(conn)
+    c.execute("""
+        SELECT MIN(data) AS mais_antigo FROM jogos
+        WHERE status = 'SCHEDULED'
+          AND liga NOT IN %s
+          AND data < %s
+    """, (tuple(LIGAS_ESPN), agora - timedelta(minutes=90)))
+    row = c.fetchone()
+    conn.close()
+    if not row or not row["mais_antigo"]:
+        return 2
+    delta = agora - row["mais_antigo"]
+    return max(2, delta.days + 2)
+
+def _get_jogos_eu_pendentes():
+    """Retorna jogos europeus SCHEDULED que já deveriam ter terminado."""
+    agora = datetime.now(timezone.utc)
+    conn  = get_conn()
+    c     = cur(conn)
+    c.execute("""
+        SELECT id, liga, casa, fora, data FROM jogos
+        WHERE status = 'SCHEDULED'
+          AND liga NOT IN %s
+          AND data < %s
+    """, (tuple(LIGAS_ESPN), agora - timedelta(minutes=90)))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+def get_resultados_espn_eu(days_back=3):
+    """Busca resultados das ligas europeias via ESPN (backup do football-data.org)."""
+    jogos = []
+    for nome_liga, liga_espn in LIGAS_ESPN_EU.items():
+        jogos += _get_resultados_espn_liga(liga_espn, nome_liga, days_back)
+    return jogos
+
+def _remap_espn_para_ids_db(espn_jogos, jogos_pendentes_db):
+    """
+    Casa cada resultado ESPN com um jogo pendente no banco por nome+data.
+    Substitui o ID/nomes ESPN pelo ID/nomes do banco, mantendo os gols do ESPN.
+    Threshold de similaridade: 0.65 para cobrir variações de nome entre APIs.
+    """
+    from difflib import SequenceMatcher
+    remapeados = []
+    for espn_j in espn_jogos:
+        espn_casa = _normalizar(espn_j["casa"])
+        espn_fora = _normalizar(espn_j["fora"])
+        try:
+            espn_data = datetime.fromisoformat(espn_j["data"].replace("Z", "+00:00"))
+        except Exception:
+            continue
+        melhor_score, melhor_db = 0.0, None
+        for db_j in jogos_pendentes_db:
+            db_data = db_j["data"]
+            if isinstance(db_data, str):
+                try:
+                    db_data = datetime.fromisoformat(db_data.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+            if db_data.tzinfo is None:
+                db_data = db_data.replace(tzinfo=timezone.utc)
+            if abs((espn_data - db_data).total_seconds()) > 86400:
+                continue
+            score = (
+                SequenceMatcher(None, espn_casa, _normalizar(db_j["casa"])).ratio() +
+                SequenceMatcher(None, espn_fora, _normalizar(db_j["fora"])).ratio()
+            ) / 2
+            if score > melhor_score:
+                melhor_score, melhor_db = score, db_j
+        if melhor_db and melhor_score >= 0.65:
+            remapeado = dict(espn_j)
+            remapeado["id"]   = melhor_db["id"]
+            remapeado["liga"] = melhor_db["liga"]
+            remapeado["casa"] = melhor_db["casa"]
+            remapeado["fora"] = melhor_db["fora"]
+            remapeados.append(remapeado)
+            print(f"[espn-eu] {espn_j['casa']} x {espn_j['fora']} → id={melhor_db['id']} (score={melhor_score:.2f})")
+    return remapeados
+
+
 @tasks.loop(minutes=5)
 async def checar_resultados():
     channel = client.get_channel(CHANNEL_ID)
@@ -873,16 +965,29 @@ async def checar_resultados():
         return
 
     try:
-        # ESPN: toda execução (Brasileirão + Libertadores)
-        # football-data.org: só quando há jogos europeus que já deveriam ter terminado
-        espn_jogos   = await asyncio.to_thread(get_resultados_espn, 2)
+        agora         = datetime.now(timezone.utc)
+        espn_jogos    = await asyncio.to_thread(get_resultados_espn, 2)
         liberta_jogos = await asyncio.to_thread(get_resultados_libertadores, 2)
-        tem_europeus = await asyncio.to_thread(_tem_jogos_europeus_pendentes)
-        fd_jogos     = await asyncio.to_thread(get_resultados_fd, 2) if tem_europeus else []
-        if tem_europeus:
-            print("[resultados] Jogos europeus pendentes — consultando football-data.org")
+        tem_europeus  = await asyncio.to_thread(_tem_jogos_europeus_pendentes)
 
-        jogos_finais = espn_jogos + liberta_jogos + fd_jogos
+        fd_jogos      = []
+        espn_eu_jogos = []
+
+        if tem_europeus:
+            days_back_eu    = await asyncio.to_thread(_days_back_europeus)
+            jogos_pendentes = await asyncio.to_thread(_get_jogos_eu_pendentes)
+            print(f"[resultados] {len(jogos_pendentes)} jogo(s) europeu(s) pendente(s) — FD days_back={days_back_eu} + ESPN backup")
+
+            fd_jogos    = await asyncio.to_thread(get_resultados_fd, days_back_eu)
+            espn_eu_raw = await asyncio.to_thread(get_resultados_espn_eu, days_back_eu)
+
+            fd_ids        = {j["id"] for j in fd_jogos}
+            espn_eu_jogos = [j for j in _remap_espn_para_ids_db(espn_eu_raw, jogos_pendentes)
+                             if j["id"] not in fd_ids]
+            if espn_eu_jogos:
+                print(f"[espn-eu] {len(espn_eu_jogos)} jogo(s) recuperado(s) via ESPN")
+
+        jogos_finais = espn_jogos + liberta_jogos + fd_jogos + espn_eu_jogos
 
         conn = get_conn()
         c    = cur(conn)
