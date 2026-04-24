@@ -17,6 +17,9 @@ DATABASE_URL   = os.environ["DATABASE_URL"]
 API_KEY        = os.environ.get("API_KEY", "")
 ODDS_API_KEY   = os.environ.get("ODDS_API_KEY", "")
 
+# Brasil não observa horário de verão desde 2019 — UTC-3 é permanente
+_BRT = timezone(timedelta(hours=-3))
+
 intents = discord.Intents.default()
 client  = discord.Client(intents=intents)
 tree    = app_commands.CommandTree(client)
@@ -103,6 +106,55 @@ def _normalizar(nome):
     nome = re.sub(r"[^a-z0-9 ]", "", nome)
     return re.sub(r"\s+", " ", nome).strip()
 
+def _american_to_decimal(odds_str):
+    try:
+        ml = int(str(odds_str).replace("+", ""))
+        return round((ml / 100 + 1) if ml > 0 else (100 / abs(ml) + 1), 2)
+    except (ValueError, ZeroDivisionError):
+        return None
+
+def _get_odds_espn_liga(liga_espn: str, nome_liga: str):
+    """Busca odds do ESPN (DraftKings moneyline) para jogos agendados de uma liga.
+    Retorna {espn_id: {odds_casa, odds_empate, odds_fora}}"""
+    from datetime import datetime, timedelta
+    resultado = {}
+    hoje = datetime.today()
+    for i in range(8):
+        data = (hoje + timedelta(days=i)).strftime("%Y%m%d")
+        try:
+            r = requests.get(f"{ESPN_BASE}/{liga_espn}/scoreboard", params={"dates": data}, timeout=10)
+            if not r.ok:
+                continue
+            for evento in r.json().get("events", []):
+                comp       = evento["competitions"][0]
+                status_obj = comp["status"]["type"]
+                if status_obj.get("completed", False):
+                    continue
+                odds_list = comp.get("odds", [])
+                if not odds_list:
+                    continue
+                o = odds_list[0]
+                ml = o.get("moneyline", {})
+                home_ml = (ml.get("home", {}).get("close") or ml.get("home", {}).get("open") or {}).get("odds")
+                away_ml = (ml.get("away", {}).get("close") or ml.get("away", {}).get("open") or {}).get("odds")
+                draw_ml = o.get("drawOdds", {}).get("moneyLine")
+                if not (home_ml and away_ml and draw_ml):
+                    continue
+                resultado[f"espn_{evento['id']}"] = {
+                    "odds_casa":   _american_to_decimal(home_ml),
+                    "odds_empate": _american_to_decimal(draw_ml),
+                    "odds_fora":   _american_to_decimal(away_ml),
+                }
+        except Exception:
+            pass
+    return resultado
+
+LIGAS_ESPN_CODES = {
+    "Brasileirão":    "bra.1",
+    "Libertadores":   "conmebol.libertadores",
+    "Copa do Brasil": "bra.copa_do_brazil",
+}
+
 def _get_odds_map():
     """Busca odds h2h de todas as ligas europeias. Retorna {(home_norm, away_norm): {casa, empate, fora}}"""
     if not ODDS_API_KEY:
@@ -176,6 +228,11 @@ def _db_atualizar_odds():
     odds_map   = _get_odds_map()
     tabela_bra = _calcular_odds_brasileirao()
 
+    # Odds ESPN (moneyline DraftKings) para ligas brasileiras
+    espn_odds = {}
+    for nome, code in LIGAS_ESPN_CODES.items():
+        espn_odds.update(_get_odds_espn_liga(code, nome))
+
     conn = get_conn()
     c    = cur(conn)
     agora = datetime.now(timezone.utc)
@@ -184,7 +241,11 @@ def _db_atualizar_odds():
 
     atualizados = 0
     for j in jogos:
-        if j["liga"] == "Brasileirão":
+        # ESPN primeiro (mais preciso); standings como fallback para ligas brasileiras
+        if j["liga"] in LIGAS_ESPN_CODES and j["id"] in espn_odds:
+            eo = espn_odds[j["id"]]
+            oh, od, oa = eo["odds_casa"], eo["odds_empate"], eo["odds_fora"]
+        elif j["liga"] in ("Brasileirão", "Copa do Brasil"):
             oh, od, oa = _odds_para_jogo(j["casa"], j["fora"], tabela_bra)
         else:
             h_key = _normalizar(j["casa"]); a_key = _normalizar(j["fora"])
@@ -251,6 +312,150 @@ def get_resultados_espn(days_back=2):
 
 def get_resultados_libertadores(days_back=2):
     return _get_resultados_espn_liga("conmebol.libertadores", "Libertadores", days_back)
+
+def get_resultados_copa_do_brasil(days_back=2):
+    return _get_resultados_espn_liga("bra.copa_do_brazil", "Copa do Brasil", days_back)
+
+def _recuperar_espn_pendentes_db():
+    """Busca resultado na ESPN para jogos SCHEDULED no banco que já deveriam ter terminado.
+    Usa a data BRT do jogo para consultar a ESPN, pois jogos brasileiros ficam sob a data
+    BRT na API (ex: 21h30 BRT = 00h30 UTC dia seguinte, mas consta como dia anterior na ESPN).
+    Suporta jogos com IDs ESPN (match exato) e jogos adicionados manualmente (match por nome).
+    Retorna sempre com o ID original do banco para garantir que palpites sejam processados.
+    """
+    from difflib import SequenceMatcher
+
+    agora = datetime.now(timezone.utc)
+    conn = get_conn()
+    c = cur(conn)
+    c.execute("""
+        SELECT id, liga, casa, fora, logo_casa, logo_fora, data
+        FROM jogos
+        WHERE status = 'SCHEDULED'
+          AND liga IN %s
+          AND data < %s
+    """, (tuple(LIGAS_ESPN_CODES.keys()), agora - timedelta(minutes=90)))
+    pendentes = [dict(r) for r in c.fetchall()]
+    conn.close()
+
+    if not pendentes:
+        return []
+
+    # Passo 1: coleta eventos ESPN por (liga_code, data_str), evitando chamadas duplicadas
+    cache_eventos = {}  # (liga_code, data_str) → [lista de eventos finalizados]
+
+    for j in pendentes:
+        liga_code = LIGAS_ESPN_CODES.get(j["liga"])
+        if not liga_code:
+            continue
+        data_jogo = j["data"]
+        if hasattr(data_jogo, "tzinfo") and data_jogo.tzinfo:
+            data_brt = data_jogo.astimezone(_BRT)
+        else:
+            data_brt = data_jogo.replace(tzinfo=timezone.utc).astimezone(_BRT)
+        data_str = data_brt.strftime("%Y%m%d")
+
+        chave = (liga_code, data_str)
+        if chave in cache_eventos:
+            continue
+        try:
+            r = requests.get(f"{ESPN_BASE}/{liga_code}/scoreboard",
+                             params={"dates": data_str}, timeout=10)
+            eventos = []
+            if r.ok:
+                for evento in r.json().get("events", []):
+                    comp = evento["competitions"][0]
+                    if not comp["status"]["type"].get("completed", False):
+                        continue
+                    times = {t["homeAway"]: t for t in comp["competitors"]}
+                    eventos.append({
+                        "espn_id":   f"espn_{evento['id']}",
+                        "casa":      times["home"]["team"]["shortDisplayName"],
+                        "fora":      times["away"]["team"]["shortDisplayName"],
+                        "logo_casa": times["home"]["team"].get("logo", ""),
+                        "logo_fora": times["away"]["team"].get("logo", ""),
+                        "gols_casa": int(times["home"].get("score", 0)),
+                        "gols_fora": int(times["away"].get("score", 0)),
+                        "data":      comp["date"],
+                    })
+            else:
+                print(f"[pendentes-db] ESPN retornou {r.status_code} para {liga_code} {data_str}")
+            cache_eventos[chave] = eventos
+        except Exception as e:
+            print(f"[pendentes-db] Erro ao consultar ESPN {liga_code} {data_str}: {e}")
+            cache_eventos[chave] = []
+
+    # Passo 2: para cada jogo pendente, tenta match exato (ESPN ID) ou fuzzy (nome do time)
+    resultados = []
+    for j in pendentes:
+        liga_code = LIGAS_ESPN_CODES.get(j["liga"])
+        if not liga_code:
+            continue
+        data_jogo = j["data"]
+        if hasattr(data_jogo, "tzinfo") and data_jogo.tzinfo:
+            data_brt = data_jogo.astimezone(_BRT)
+        else:
+            data_brt = data_jogo.replace(tzinfo=timezone.utc).astimezone(_BRT)
+        data_str = data_brt.strftime("%Y%m%d")
+
+        eventos = cache_eventos.get((liga_code, data_str), [])
+
+        matched_ev = None
+
+        # Match exato por ID ESPN
+        if j["id"].startswith("espn_"):
+            matched_ev = next((e for e in eventos if e["espn_id"] == j["id"]), None)
+
+        # Fallback fuzzy por nome dos times (cobre IDs não-ESPN e variações de ID)
+        if not matched_ev:
+            db_casa = _normalizar(j["casa"])
+            db_fora = _normalizar(j["fora"])
+            melhor_score = 0.0
+            for ev in eventos:
+                score = (
+                    SequenceMatcher(None, db_casa, _normalizar(ev["casa"])).ratio() +
+                    SequenceMatcher(None, db_fora, _normalizar(ev["fora"])).ratio()
+                ) / 2
+                if score > melhor_score:
+                    melhor_score, matched_ev = score, ev
+            if matched_ev and melhor_score < 0.65:
+                matched_ev = None
+            elif matched_ev:
+                print(f"[pendentes-db] {j['casa']} x {j['fora']} matched via fuzzy "
+                      f"(score={melhor_score:.2f}, id={j['id']})")
+
+        if matched_ev:
+            resultados.append({
+                "id":        j["id"],   # ID original do banco — garante match de palpites
+                "liga":      j["liga"],
+                "data":      matched_ev["data"],
+                "casa":      j["casa"],
+                "fora":      j["fora"],
+                "logo_casa": matched_ev["logo_casa"] or j.get("logo_casa", ""),
+                "logo_fora": matched_ev["logo_fora"] or j.get("logo_fora", ""),
+                "gols_casa": matched_ev["gols_casa"],
+                "gols_fora": matched_ev["gols_fora"],
+            })
+
+    if resultados:
+        print(f"[pendentes-db] {len(resultados)} jogo(s) recuperado(s) via data do banco")
+    return resultados
+
+
+def _get_copa_br_pendentes():
+    """Retorna jogos Copa do Brasil SCHEDULED que já deveriam ter terminado."""
+    agora = datetime.now(timezone.utc)
+    conn = get_conn()
+    c = cur(conn)
+    c.execute("""
+        SELECT id, liga, casa, fora, data FROM jogos
+        WHERE status = 'SCHEDULED'
+          AND liga = 'Copa do Brasil'
+          AND data < %s
+    """, (agora - timedelta(minutes=90),))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
 
 def get_resultados_fd(days_back=2):
     hoje      = datetime.today()
@@ -434,8 +639,7 @@ def odd_do_palpite(p_casa, p_fora, odds_casa, odds_empate, odds_fora):
     return odds_empate
 
 def fmt_brt(dt_utc):
-    brt = timezone(timedelta(hours=-3))
-    return dt_utc.astimezone(brt).strftime("%d/%m %H:%M")
+    return dt_utc.astimezone(_BRT).strftime("%d/%m %H:%M")
 
 
 # ── Eventos ───────────────────────────────────────────────────────────────────
@@ -792,7 +996,7 @@ async def _enviar_lembrete(channel, jogo, faltam_horas: int, conn, c):
     """, (jogo["id"],))
     sem_palpite = [r["nome"] for r in c.fetchall()]
 
-    horario = jogo["data"].astimezone(timezone(timedelta(hours=-3))).strftime("%H:%M")
+    horario = jogo["data"].astimezone(_BRT).strftime("%H:%M")
 
     embed = discord.Embed(
         title=f"⏰ {jogo['casa']} x {jogo['fora']}",
@@ -857,7 +1061,7 @@ async def checar_lembretes():
 
 # ── Task 2: Busca resultados, processa e notifica ─────────────────────────────
 
-LIGAS_ESPN = {"Brasileirão", "Libertadores"}
+LIGAS_ESPN = {"Brasileirão", "Libertadores", "Copa do Brasil"}
 
 def _tem_jogos_europeus_pendentes():
     """Retorna True se há jogos europeus SCHEDULED que já deveriam ter terminado."""
@@ -966,9 +1170,20 @@ async def checar_resultados():
 
     try:
         agora         = datetime.now(timezone.utc)
-        espn_jogos    = await asyncio.to_thread(get_resultados_espn, 2)
-        liberta_jogos = await asyncio.to_thread(get_resultados_libertadores, 2)
-        tem_europeus  = await asyncio.to_thread(_tem_jogos_europeus_pendentes)
+        espn_jogos       = await asyncio.to_thread(get_resultados_espn, 2)
+        liberta_jogos    = await asyncio.to_thread(get_resultados_libertadores, 2)
+        copa_br_jogos    = await asyncio.to_thread(get_resultados_copa_do_brasil, 2)
+        copa_br_pendentes = await asyncio.to_thread(_get_copa_br_pendentes)
+        pendentes_db     = await asyncio.to_thread(_recuperar_espn_pendentes_db)
+        tem_europeus     = await asyncio.to_thread(_tem_jogos_europeus_pendentes)
+
+        # Remapeia resultados ESPN da Copa do Brasil para os IDs reais do banco.
+        # Necessário quando jogos foram cadastrados com IDs não-ESPN (ex: via dashboard).
+        if copa_br_pendentes:
+            copa_br_remapped = _remap_espn_para_ids_db(copa_br_jogos, copa_br_pendentes)
+            if copa_br_remapped:
+                print(f"[copa-br] {len(copa_br_remapped)} jogo(s) mapeado(s) para IDs do banco")
+            copa_br_jogos = copa_br_remapped
 
         fd_jogos      = []
         espn_eu_jogos = []
@@ -987,7 +1202,7 @@ async def checar_resultados():
             if espn_eu_jogos:
                 print(f"[espn-eu] {len(espn_eu_jogos)} jogo(s) recuperado(s) via ESPN")
 
-        jogos_finais = espn_jogos + liberta_jogos + fd_jogos + espn_eu_jogos
+        jogos_finais = espn_jogos + liberta_jogos + copa_br_jogos + pendentes_db + fd_jogos + espn_eu_jogos
 
         conn = get_conn()
         c    = cur(conn)
@@ -1159,7 +1374,7 @@ async def atualizar_odds():
 @tasks.loop(time=dt_time(hour=1, minute=0, tzinfo=timezone.utc))
 async def recarga_semanal():
     # Só executa no domingo BRT (01h UTC segunda = 22h BRT domingo)
-    agora_brt = datetime.now(timezone(timedelta(hours=-3)))
+    agora_brt = datetime.now(_BRT)
     if agora_brt.weekday() != 6:  # 6 = domingo
         return
 
