@@ -773,20 +773,24 @@ def _db_buscar_ranking():
     c    = cur(conn)
     c.execute("""
         SELECT p.usuario,
-               COALESCE(SUM(p.pontos), 0)                          AS total_pontos,
-               COUNT(CASE WHEN p.pontos IN (4.5, 9.0) THEN 1 END)  AS placares_exatos,
-               COUNT(CASE WHEN p.pontos IS NOT NULL THEN 1 END)     AS jogos_avaliados,
+               COALESCE(SUM(p.pontos), 0)                                                       AS total_pontos,
+               COUNT(CASE WHEN p.pontos IN (4.5, 9.0) THEN 1 END)                              AS placares_exatos,
+               COUNT(CASE WHEN p.pontos IS NOT NULL THEN 1 END)                                 AS jogos_avaliados,
                u.saldo_ec,
-               COALESCE(SUM(CASE WHEN p.pontos IS NULL THEN p.moeda_apostada ELSE 0 END), 0) AS ec_em_jogo
+               COALESCE(SUM(CASE WHEN p.pontos IS NULL THEN p.moeda_apostada ELSE 0 END), 0)   AS ec_em_jogo
         FROM palpites p
         JOIN usuarios u ON p.usuario = u.nome
         WHERE p.moeda_apostada > 0
         GROUP BY p.usuario, u.saldo_ec
-        ORDER BY (COALESCE(SUM(p.pontos), 0) * u.saldo_ec) DESC,
-                 COALESCE(SUM(p.pontos), 0) DESC,
-                 COUNT(CASE WHEN p.pontos IN (4.5, 9.0) THEN 1 END) DESC
     """)
-    rows = [dict(r) for r in c.fetchall()]
+    rows = []
+    for r in c.fetchall():
+        d = dict(r)
+        banca_disp = max(0.0, float(d["saldo_ec"]) - float(d["ec_em_jogo"]))
+        d["score"] = round(float(d["total_pontos"]) * banca_disp, 2)
+        d["banca_disp"] = banca_disp
+        rows.append(d)
+    rows.sort(key=lambda r: (-r["score"], -r["total_pontos"], -r["placares_exatos"]))
     conn.close()
     return rows
 
@@ -802,13 +806,12 @@ async def cmd_ranking(interaction: discord.Interaction):
     medals = ["🥇", "🥈", "🥉"]
     linhas = []
     for i, r in enumerate(ranking):
-        medal  = medals[i] if i < 3 else f"**{i+1}.**"
-        score  = round(r["total_pontos"] * r["saldo_ec"], 2)
+        medal = medals[i] if i < 3 else f"**{i+1}.**"
         linhas.append(
             f"{medal} **{r['usuario']}**\n"
-            f"┣ ⭐ Score: `{score}` · 📊 `{r['total_pontos']} pts`\n"
+            f"┣ ⭐ Score: `{r['score']}` · 📊 `{r['total_pontos']} pts`\n"
             f"┣ 🎯 Placares exatos: `{r['placares_exatos']}` · 🎮 Jogos: `{r['jogos_avaliados']}`\n"
-            f"┗ 💰 Banca: `{r['saldo_ec']:.2f} EC`"
+            f"┗ 💰 Banca disp.: `{r['banca_disp']:.2f} EC` (total: `{r['saldo_ec']:.2f} EC`)"
         )
 
     embed = discord.Embed(
@@ -816,7 +819,7 @@ async def cmd_ranking(interaction: discord.Interaction):
         description="\n\n".join(linhas),
         color=0xeab308,
     )
-    embed.set_footer(text="Score = Pontos × Banca Disponível")
+    embed.set_footer(text="Score = Pontos × Banca Disponível (descontando EC em jogo)")
     await interaction.followup.send(embed=embed)
 
 
@@ -1328,23 +1331,28 @@ async def checar_resultados():
         # Ranking
         if notificados:
             c.execute("""
-                SELECT p.usuario, COALESCE(SUM(p.pontos), 0) AS total_pontos, u.saldo_ec
+                SELECT p.usuario,
+                       COALESCE(SUM(p.pontos), 0)                                                     AS total_pontos,
+                       u.saldo_ec,
+                       COALESCE(SUM(CASE WHEN p.pontos IS NULL THEN p.moeda_apostada ELSE 0 END), 0) AS ec_em_jogo
                 FROM palpites p JOIN usuarios u ON p.usuario = u.nome
                 WHERE p.moeda_apostada > 0
                 GROUP BY p.usuario, u.saldo_ec
-                ORDER BY (COALESCE(SUM(p.pontos), 0) * u.saldo_ec) DESC,
-                         COALESCE(SUM(p.pontos), 0) DESC
             """)
-            ranking = c.fetchall()
-            if ranking:
+            ranking_raw = c.fetchall()
+            if ranking_raw:
+                ranking_ord = []
+                for r in ranking_raw:
+                    banca_disp = max(0.0, float(r["saldo_ec"]) - float(r["ec_em_jogo"]))
+                    ranking_ord.append((r, round(float(r["total_pontos"]) * banca_disp, 2), banca_disp))
+                ranking_ord.sort(key=lambda x: (-x[1], -x[0]["total_pontos"]))
                 medals = ["🥇", "🥈", "🥉"]
                 linhas = []
-                for i, r in enumerate(ranking):
+                for i, (r, score, banca_disp) in enumerate(ranking_ord):
                     medal = medals[i] if i < 3 else f"**{i+1}.**"
-                    score = round(r["total_pontos"] * r["saldo_ec"], 2)
                     linhas.append(
                         f"{medal} **{r['usuario']}** — "
-                        f"{r['total_pontos']} pts · 💰 {r['saldo_ec']:.2f} EC · ⭐ {score}"
+                        f"{r['total_pontos']} pts · 💰 {banca_disp:.2f} EC disp. · ⭐ {score}"
                     )
                 await channel.send(embed=discord.Embed(
                     title="🏆 Ranking Lisan al Gaib — Atualizado",
